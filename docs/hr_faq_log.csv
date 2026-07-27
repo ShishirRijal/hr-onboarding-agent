@@ -1,0 +1,56 @@
+question,ground_truth_answer,source_doc,category,country
+"What operating system does a new NordTech laptop come with by default?","macOS is the default; Windows is available on request via IT.",it_guide,IT,All
+"How long do I have to enable two-factor authentication (2FA) on my company accounts?","2FA must be enabled within 24 hours of account creation.",it_guide,IT,All
+"Which VPN does NordTech use?","NordVPN Teams, using the 'NordTech Internal' server profile.",it_guide,IT,All
+"What is the one-time peripherals budget for ordering equipment through IT?","€300 per employee, one-time, and it must be approved by your manager.",it_guide,IT,All
+"Who must approve an equipment request that exceeds the standard peripherals budget?","Your manager, plus additional approval from Ott Rebane (Finance Manager) for amounts exceeding €300.",it_guide,IT,All
+"What is the IT support response SLA for critical issues?","4 hours.",it_guide,IT,All
+"What is the IT support response SLA for normal (non-critical) requests?","1 business day.",it_guide,IT,All
+"What email address should I use to contact IT support?","it-support@nordtech.ee",it_guide,IT,All
+"What password manager must all employees use for work-related passwords?","1Password.",it_guide,IT,All
+"What platform does NordTech use for company email and calendar?","Google Workspace.",it_guide,IT,All
+"Which VPN server profile should I select to access internal systems?","The 'NordTech Internal' server profile, not a standard consumer NordVPN server.",it_guide,IT,All
+"How can I confirm my VPN connection is working correctly?","Visit wiki.nordtech.internal in your browser; if the page loads, the VPN is working.",it_guide,IT,All
+"What core software tools are pre-installed as part of the standard employee toolkit?","Slack, Notion, Linear, Figma, VS Code, and 1Password.",it_guide,IT,All
+"Is full disk encryption something I need to set up myself?","No, it is enabled automatically as part of the MDM setup process and cannot be disabled.",it_guide,IT,All
+"How do I raise an urgent IT issue outside normal office hours?","Post in the #it-support Slack channel with 'URGENT' in the message, which pages the on-call IT engineer.",it_guide,IT,All
+"How many days of annual leave does an employee based in Estonia get?","28 calendar days per year.",leave_policy,Leave,Estonia
+"How many days of annual leave does an employee based in Finland get?","25 working days per year (not calendar days).",leave_policy,Leave,Finland
+"How many annual leave days does an employee in Portugal get, and does this increase over time?","22 working days per year, increasing to 25 working days (3 extra loyalty days) after 3 years of continuous service.",leave_policy,Leave,Portugal
+"From which day does NordTech pay sick leave for an employee based in Estonia?","From day 1: 100% of salary for the first 3 days, then 70% from day 4 through day 30.",leave_policy,Leave,Estonia
+"For a Finland-based employee, is the first day of sick leave paid?","No, day 1 is unpaid. NordTech pays 100% of salary from day 2 through day 9; Kela takes over from day 10.",leave_policy,Leave,Finland
+"Who pays sick leave for a Portugal-based employee from day 4 onward?","Segurança Social (Portuguese Social Security), at 55–70% of reference earnings depending on duration.",leave_policy,Leave,Portugal
+"How many unused annual leave days can be carried over into the next calendar year?","A maximum of 5 days.",leave_policy,Leave,All
+"How far in advance must a leave request of more than 5 days be submitted?","At least 2 weeks in advance.",leave_policy,Leave,All
+"What system is used to request time off?","Personio.",leave_policy,Leave,All
+"Name one public holiday NordTech observes only for its Estonian employees.","Independence Day (24 February) is an Estonian public holiday not observed in Finland or Portugal.",leave_policy,Leave,Estonia
+"When does dental coverage begin under NordTech's health insurance plan?","Dental coverage begins after 3 months of continuous employment (core Cigna coverage starts from month 1).",benefits_guide,Benefits,All
+"What pension benefit does NordTech provide for employees based in Estonia?","A II pillar top-up of 2% of gross salary, on top of the employee's own statutory II pillar contribution.",benefits_guide,Benefits,Estonia
+"What pension scheme applies to employees based in Finland?","TyEL, the Finnish statutory earnings-related pension scheme, handled automatically through payroll.",benefits_guide,Benefits,Finland
+"What is the pension contribution match available to employees based in Portugal?","An optional PPR (Plano Poupança Reforma) contribution match of up to 3% of gross salary.",benefits_guide,Benefits,Portugal
+"What is the monthly gym/wellness budget?","€50 per month, reimbursed via Expensify.",benefits_guide,Benefits,All
+"What is the annual learning budget per employee?","€1,500 per year, covering courses, books, certifications, and conferences (conferences require manager approval).",benefits_guide,Benefits,All
+"When does the home office setup benefit become available, and how much is it?","After 6 months of employment, for a one-time amount of €500.",benefits_guide,Benefits,All
+"After how many months of employment do employees become eligible for stock options?","12 months.",benefits_guide,Benefits,All
+"What is the daily meal allowance for domestic business travel?","€25 per day.",expense_policy,Expenses,All
+"What is the daily meal allowance for international business travel?","€40 per day.",expense_policy,Expenses,All
+"What is the nightly hotel cap for international travel?","€200 per night; anything above that requires prior manager approval.",expense_policy,Expenses,All
+"When is business class air travel permitted?","Only for flights longer than 6 hours, and it requires manager approval.",expense_policy,Expenses,All
+"Above what amount do I need a receipt for an expense?","€25.",expense_policy,Expenses,All
+"Within how many days of an expense must I submit it via Expensify?","30 days.",expense_policy,Expenses,All
+"Is alcohol reimbursable, and if so under what conditions?","Only in the context of client entertainment, capped at €50 per event.",expense_policy,Expenses,All
+"Who is NordTech's CTO and which office is he based in?","Kaspar Tamm, based in the Tallinn office.",org_chart,Org,All
+"Who is NordTech's Head of HR?","Eva Kallas.",org_chart,Org,All
+"Which team is Joana Pereira on, and where is she based?","Product Engineering, based in Porto.",org_chart,Org,All
+"Who is the Engineering Manager for the AI/ML team, and where is he based?","Mikko Virtanen, based in Tampere.",org_chart,Org,All
+"Who is NordTech's CPO and which office is she based in?","Ana Ferreira, based in the Porto office.",org_chart,Org,All
+"How long does NordTech retain employment records after an employee leaves the company?","7 years after the employee leaves.",gdpr_employee_policy,GDPR,All
+"How long is health data retained under NordTech's data policy?","5 years.",gdpr_employee_policy,GDPR,All
+"How long is recruitment data kept for candidates who are not hired?","6 months after the recruitment process closes.",gdpr_employee_policy,GDPR,All
+"Within how many hours must a suspected data breach be reported to IT?","Within 2 hours of discovery, via the #it-support Slack channel or it-support@nordtech.ee.",gdpr_employee_policy,GDPR,All
+"Which third-party processor handles NordTech's employee health insurance data?","Cigna.",gdpr_employee_policy,GDPR,All
+"Can I expense a standing desk for my home office?","Not documented in any policy. This should be escalated to HR rather than assumed as covered.",NONE,Escalation,All
+"What is the salary review process and when do raises happen?","Not documented in any policy. This should be escalated to your manager or HR directly.",NONE,Escalation,All
+"Can I work from a different country for a month?","Not fully addressed in any policy. This should be escalated to HR before making plans, per the Remote Work Policy's note on extended cross-border work.",NONE,Escalation,All
+"What happens to my stock options if I'm made redundant?","Not covered in any policy document; treatment of unvested stock options is handled case-by-case by HR and Finance.",NONE,Escalation,All
+"Is there a budget for team social events?","Not documented in any policy. This should be escalated to HR or your manager.",NONE,Escalation,All
