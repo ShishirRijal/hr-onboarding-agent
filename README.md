@@ -7,11 +7,76 @@
 [![Qdrant](https://img.shields.io/badge/Qdrant-FF6F61?logo=qdrant&logoColor=white)](https://qdrant.tech/)
 [![Poetry](https://img.shields.io/badge/Poetry-60A5FA?logo=poetry&logoColor=white)](https://python-poetry.org/)
 
-HR onboarding assistant for NordTech Solutions, a distributed company with offices in Tallinn, Porto, and Tampere. It helps employees find clear answers from internal policy documents, reduces repetitive HR support, and escalates uncertain or out-of-scope questions to HR.
+HR onboarding assistant for NordTech Solutions, a fictional 200-person company with offices in Tallinn, Porto, and Tampere. It is scoped to HR onboarding and policy lookup: the agent answers common employee questions from internal documents, reduces repetitive HR support, and escalates uncertain or out-of-scope questions to HR.
 
 ## Architecture
 
 Single LangGraph agent, multiple tools.
+
+The system is built as one agent with five tools:
+
+- RAG retrieval
+- confidence scoring
+- HR escalation
+- interaction logging
+- a weekly digest job
+
+This keeps the system bounded and easy to reason about while still covering the full workflow from question to answer or handoff.
+
+## What This Project Is
+
+This is a single LangGraph agent for HR onboarding and internal policy support. It answers employee questions from a fixed knowledge base, uses retrieval to stay grounded, and escalates when the system is not confident enough to answer safely.
+
+The goal is a production-style assistant that can handle the repetitive HR questions employees ask during onboarding and day-to-day work, while preserving a human handoff for edge cases.
+
+## Company Context
+
+NordTech Solutions is the fictional company behind the project. It is a ~200-person tech startup with offices in Tallinn, Porto, and Tampere.
+
+That setup is deliberate. It gives the project a realistic but bounded domain, and the three-office, EU-based structure makes the HR content naturally include leave rules, benefits, compliance, and contact routing across multiple countries.
+
+The documents in this repo are written for that context and are meant to feel like real internal policy material, not generic demo text.
+
+## The Five Tools
+
+The agent is built around five tools:
+
+1. `RAG Retrieval Tool`
+   - Takes the employee's question and retrieves the most relevant chunks from the HR knowledge base.
+   - The knowledge base includes the handbook, leave policy, IT setup docs, benefits material, onboarding docs, and related policy references.
+   - Uses hybrid search so it can combine keyword matching and semantic retrieval instead of relying on only one method.
+   - Passes the top candidates through a reranking step before the answer is generated, so the model sees the strongest evidence first.
+   - Returns the retrieved chunks with source attribution and relevance scores.
+
+2. `Confidence Scorer`
+   - Scores how confident the system should be that the retrieved context is enough to answer the question safely.
+   - Exists because an HR assistant that confidently guesses wrong is worse than one that escalates.
+   - Uses retrieval quality and groundedness signals to decide whether the answer should be returned or handed off.
+   - Produces a confidence value that drives the agent's branching logic.
+   - Low confidence triggers escalation instead of a speculative response.
+
+3. `HR Escalation Tool`
+   - Activates when confidence is too low or the question needs human judgment.
+   - Routes the query to a human HR contact rather than letting the model invent an answer.
+   - Handles sensitive or edge-case questions such as grievances, legal ambiguity, or anything outside the policy set.
+   - Formats the question and context into a structured handoff so HR can review it quickly.
+   - This is the system's safety valve and the main human-in-the-loop path.
+
+4. `Interaction Logger`
+   - Logs every interaction for traceability, debugging, and later analysis.
+   - Records the question, retrieved context, confidence score, whether the query escalated, and the final answer.
+   - Provides an audit trail for evaluating how the system behaves over time.
+   - Supports later analysis of common question patterns and unanswered topics.
+   - Feeds the weekly digest workflow.
+
+5. `Weekly Digest Job`
+   - Runs independently on a schedule rather than inside the chat loop.
+   - Summarizes the week's unanswered or low-confidence questions.
+   - Groups recurring topics and flags documentation gaps for HR.
+   - Gives the system a background automation layer, not just a request/response chat flow.
+   - Demonstrates that the assistant can support ongoing knowledge maintenance, not only live answers.
+
+This setup keeps the agent simple: one brain, a few clearly separated responsibilities, and a safe fallback path when the answer is uncertain.
 
 ```mermaid
 flowchart TD
@@ -63,13 +128,11 @@ The knowledge base lives in `docs/` and includes:
 - EU AI Act Compliance Summary
 - HR FAQ Log
 
-## About NordTech Solutions
-
-NordTech Solutions is the fictional company behind this knowledge base. It operates across three offices in Tallinn, Porto, and Tampere, with policies shaped for a distributed team. The content in this repository covers the employee questions that typically come up during onboarding and day-to-day work: how to set up devices, where to request leave, what benefits are available, who to contact, and how internal policies work.
-
 ## What It Is For
 
 This system is designed to give employees a fast, grounded way to get HR answers without forcing them to search across multiple documents or wait for manual replies. It is meant to answer routine policy questions directly, cite the right internal sources, and route edge cases to HR when the documents are incomplete or the confidence score is low.
+
+The build order is also intentional: document ingestion comes first, then retrieval, then the agent layer, then the API and UI.
 
 ## Tech Stack
 
