@@ -7,7 +7,7 @@
 [![Qdrant](https://img.shields.io/badge/Qdrant-FF6F61?logo=qdrant&logoColor=white)](https://qdrant.tech/)
 [![Poetry](https://img.shields.io/badge/Poetry-60A5FA?logo=poetry&logoColor=white)](https://python-poetry.org/)
 
-HR onboarding assistant for NordTech Solutions, a fictional 200-person company with offices in Tallinn, Porto, and Tampere. It is scoped to HR onboarding and policy lookup: the agent answers common employee questions from internal documents, reduces repetitive HR support, and escalates uncertain or out-of-scope questions to HR.
+HR onboarding assistant for NordTech Solutions, a fictional 200-person company with offices in Tallinn, Porto, and Tampere. It is scoped to HR onboarding and policy lookup: the agent answers common employee questions from the internal corpus, reduces repetitive HR support, and escalates uncertain or out-of-scope questions to HR.
 
 ## Architecture
 
@@ -113,9 +113,9 @@ flowchart TD
   EH --> LU[log_unanswered]
 ```
 
-## Documents
+## Corpus
 
-The knowledge base lives in `docs/` and includes:
+The knowledge base lives in `corpus/` and includes:
 
 - Employee Handbook
 - Onboarding Checklist
@@ -127,6 +127,8 @@ The knowledge base lives in `docs/` and includes:
 - GDPR Employee Data Policy
 - EU AI Act Compliance Summary
 - HR FAQ Log
+
+Project documentation lives in `docs/` and is reserved for architecture notes, ingestion and retrieval design, and ADRs.
 
 ## What It Is For
 
