@@ -80,6 +80,41 @@ def print_summary(summary: list[dict[str, Any]]) -> None:
         )
 
 
+def ensure_qdrant_collection(
+    client: Any,
+    collection_name: str,
+    vector_size: int,
+) -> None:
+    try:
+        from qdrant_client.http.models import Distance, VectorParams
+    except ImportError as exc:  # pragma: no cover - dependency guard
+        raise RuntimeError("qdrant-client is required to create or inspect collections.") from exc
+
+    collection_exists = False
+    if hasattr(client, "collection_exists"):
+        collection_exists = client.collection_exists(collection_name)
+    else:  # pragma: no cover - older client compatibility
+        try:
+            client.get_collection(collection_name=collection_name)
+            collection_exists = True
+        except Exception:
+            collection_exists = False
+
+    if collection_exists:
+        return
+
+    try:
+        client.create_collection(
+            collection_name=collection_name,
+            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+        )
+    except Exception as exc:  # pragma: no cover - runtime integration guard
+        raise RuntimeError(
+            f"Qdrant collection '{collection_name}' does not exist and could not be created. "
+            "Create it manually or check Qdrant connectivity/configuration."
+        ) from exc
+
+
 def main() -> None:
     load_dotenv()
     args = parse_args()
@@ -95,8 +130,12 @@ def main() -> None:
     model = load_embedding_model(args.model)
     texts = [chunk.text for chunk in chunks]
     embeddings = embed_texts(model, texts)
+    if not embeddings:
+        print("No embeddings generated. Nothing to ingest.")
+        return
 
     client = QdrantClient(url=args.qdrant_url)
+    ensure_qdrant_collection(client, args.collection, len(embeddings[0]))
     replace_corpus_points(client, args.collection, chunks, embeddings)
 
     summary = summarize_chunks(chunks)
