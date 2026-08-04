@@ -14,6 +14,7 @@ COUNTRY_MARKERS = {
     "finland": "Finland",
     "portugal": "Portugal",
 }
+MIN_MARKDOWN_CHUNK_LENGTH = 40
 
 
 def process_markdown_file(
@@ -58,7 +59,7 @@ def process_markdown_file(
     for section_index, doc in enumerate(section_docs):
         section_path = _build_section_path(doc.metadata)
         section_country = infer_country_from_section(section_path, default=base_metadata["country"])
-        sub_chunks = char_splitter.split_text(doc.page_content)
+        sub_chunks = _merge_short_chunks(char_splitter.split_text(doc.page_content))
 
         for chunk_index, chunk_text in enumerate(sub_chunks):
             metadata = {
@@ -202,6 +203,35 @@ def _row_to_text(row: dict[str, str]) -> str:
         if value:
             parts.append(f"{key}: {value}")
     return "\n".join(parts)
+
+
+def _merge_short_chunks(chunks: list[str], min_length: int = MIN_MARKDOWN_CHUNK_LENGTH) -> list[str]:
+    if not chunks:
+        return []
+
+    merged: list[str] = []
+    buffer = ""
+
+    for chunk in chunks:
+        cleaned = chunk.strip()
+        if not cleaned:
+            continue
+
+        candidate = f"{buffer}\n{cleaned}".strip() if buffer else cleaned
+        if len(candidate) < min_length:
+            buffer = candidate
+            continue
+
+        merged.append(candidate)
+        buffer = ""
+
+    if buffer:
+        if merged:
+            merged[-1] = f"{merged[-1]}\n{buffer}".strip()
+        elif len(buffer) >= min_length:
+            merged.append(buffer)
+
+    return merged
 
 
 class _MarkdownHeaderSplitter:

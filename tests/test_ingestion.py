@@ -8,6 +8,7 @@ from ingestion import (
     build_base_metadata,
     infer_country_from_section,
     ingest_corpus,
+    process_markdown_file,
     load_manifest,
     stable_chunk_id,
 )
@@ -138,7 +139,7 @@ def test_ingest_corpus_skips_faq_log(tmp_path: Path) -> None:
 
 ## Estonia
 
-Annual leave in Estonia.
+Annual leave in Estonia is 28 calendar days per year, and employees can take it as soon as it is accrued.
 """.strip()
     )
     (docs_dir / "hr_faq_log.csv").write_text(
@@ -162,3 +163,37 @@ sample.md:
     assert len(chunks) >= 1
     assert all(chunk.metadata["source_file"] != "hr_faq_log.csv" for chunk in chunks)
     assert any(chunk.metadata["country"] == "Estonia" for chunk in chunks)
+
+
+def test_process_markdown_file_drops_heading_only_chunks(tmp_path: Path) -> None:
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    markdown_path = docs_dir / "sample.md"
+    markdown_path.write_text(
+        """
+# Sample
+
+## Empty Section
+
+## Body Section
+This section has enough text to clear the minimum chunk length and should remain in the corpus.
+""".strip()
+    )
+
+    manifest_path = tmp_path / "manifest.yaml"
+    manifest_path.write_text(
+        """
+sample.md:
+  source_doc: sample_doc
+  doc_type: handbook
+  category: HR
+  country: All
+""".strip()
+    )
+
+    manifest = load_manifest(manifest_path)
+    base_metadata = build_base_metadata(markdown_path, manifest)
+    chunks = process_markdown_file(markdown_path, base_metadata)
+
+    assert chunks
+    assert all(len(chunk.text.strip()) >= 40 for chunk in chunks)
