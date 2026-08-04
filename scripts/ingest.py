@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from ingestion import (
     embed_texts,
@@ -90,15 +95,21 @@ def ensure_qdrant_collection(
     except ImportError as exc:  # pragma: no cover - dependency guard
         raise RuntimeError("qdrant-client is required to create or inspect collections.") from exc
 
-    collection_exists = False
-    if hasattr(client, "collection_exists"):
-        collection_exists = client.collection_exists(collection_name)
-    else:  # pragma: no cover - older client compatibility
-        try:
-            client.get_collection(collection_name=collection_name)
-            collection_exists = True
-        except Exception:
-            collection_exists = False
+    try:
+        collection_exists = False
+        if hasattr(client, "collection_exists"):
+            collection_exists = client.collection_exists(collection_name)
+        else:  # pragma: no cover - older client compatibility
+            try:
+                client.get_collection(collection_name=collection_name)
+                collection_exists = True
+            except Exception:
+                collection_exists = False
+    except Exception as exc:  # pragma: no cover - runtime integration guard
+        raise RuntimeError(
+            f"Could not reach Qdrant at collection preflight for '{collection_name}'. "
+            "Make sure the Qdrant service is running and QDRANT_URL is correct."
+        ) from exc
 
     if collection_exists:
         return
@@ -134,9 +145,18 @@ def main() -> None:
         print("No embeddings generated. Nothing to ingest.")
         return
 
-    client = QdrantClient(url=args.qdrant_url)
-    ensure_qdrant_collection(client, args.collection, len(embeddings[0]))
-    replace_corpus_points(client, args.collection, chunks, embeddings)
+    try:
+        client = QdrantClient(url=args.qdrant_url)
+        ensure_qdrant_collection(client, args.collection, len(embeddings[0]))
+        replace_corpus_points(client, args.collection, chunks, embeddings)
+    except Exception as exc:
+        print(
+            f"Error: unable to write to Qdrant at {args.qdrant_url}. "
+            "Start Qdrant locally or set QDRANT_URL to a reachable instance.",
+            file=sys.stderr,
+        )
+        print(f"Reason: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 
     summary = summarize_chunks(chunks)
     print_summary(summary)
