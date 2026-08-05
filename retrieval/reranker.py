@@ -5,7 +5,8 @@ from typing import Any
 
 from .models import RetrievedChunk
 from .settings import DEFAULT_COHERE_RERANK_MODEL
-
+import logging
+logger = logging.getLogger(__name__)
 
 def rerank(
     query: str,
@@ -21,21 +22,27 @@ def rerank(
     if client is None:
         api_key = os.getenv("COHERE_API_KEY")
         if not api_key:
+            logger.warning("COHERE_API_KEY not set — skipping rerank, returning fused results.")
             return candidates[:top_n]
 
         try:
             import cohere
         except ImportError:
+            logger.warning("cohere package not installed — skipping rerank, returning fused results.")
             return candidates[:top_n]
 
         client = cohere.ClientV2(api_key=api_key)
 
-    response = client.rerank(
-        model=model,
-        query=query,
-        documents=[candidate.text for candidate in candidates],
-        top_n=min(top_n, len(candidates)),
-    )
+    try:
+        response = client.rerank(
+            model=model,
+            query=query,
+            documents=[candidate.text for candidate in candidates],
+            top_n=min(top_n, len(candidates)),
+        )
+    except Exception:
+        logger.warning("Cohere rerank call failed — falling back to fused results.", exc_info=True)
+        return candidates[:top_n]
 
     ranked_results = getattr(response, "results", []) or []
     reranked: list[RetrievedChunk] = []
