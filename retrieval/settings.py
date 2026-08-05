@@ -1,0 +1,9 @@
+from __future__ import annotations
+
+
+DEFAULT_BM25_TOP_K = 20
+DEFAULT_DENSE_TOP_K = 20
+DEFAULT_RERANK_TOP_N = 5
+DEFAULT_RRF_K = 60
+DEFAULT_COLLECTION_NAME = "nordtech_hr"
+DEFAULT_COHERE_RERANK_MODEL = "rerank-v3.5"
