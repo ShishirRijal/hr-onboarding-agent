@@ -12,6 +12,8 @@ dependencies = [
     "langchain-openai>=0.2",
     "langchain-community>=0.3",
     "langchain-qdrant>=0.2",
+    "sentence-transformers>=3.0",
+    "pyyaml>=6.0",
     "qdrant-client>=1.11",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -25,6 +27,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "langsmith>=0.1",
     "rank-bm25>=0.2",
+    "langchain-text-splitters (>=1.1.2,<2.0.0)",
 ]
 
 [project.optional-dependencies]

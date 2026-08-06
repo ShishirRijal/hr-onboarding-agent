@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# IDEs
+.vscode/
+
 # Python
 __pycache__/
 *.py[cod]

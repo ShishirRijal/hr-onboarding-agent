@@ -1,0 +1,53 @@
+employee_handbook_v2.1.md:
+  source_doc: employee_handbook
+  doc_type: handbook
+  category: HR
+  country: All
+
+onboarding_checklist.md:
+  source_doc: onboarding_checklist
+  doc_type: checklist
+  category: HR
+  country: All
+
+it_setup_guide.md:
+  source_doc: it_guide
+  doc_type: guide
+  category: IT
+  country: All
+
+leave_absence_policy.md:
+  source_doc: leave_policy
+  doc_type: policy
+  category: HR
+  country: All
+
+benefits_perks_guide.md:
+  source_doc: benefits_guide
+  doc_type: guide
+  category: Benefits
+  country: All
+
+expense_reimbursement_policy.md:
+  source_doc: expense_policy
+  doc_type: policy
+  category: Finance
+  country: All
+
+org_chart_team_directory.md:
+  source_doc: org_chart
+  doc_type: directory
+  category: Org
+  country: All
+
+gdpr_employee_data_policy.md:
+  source_doc: gdpr_employee_policy
+  doc_type: policy
+  category: Legal
+  country: All
+
+eu_ai_act_compliance_summary.md:
+  source_doc: eu_ai_act_summary
+  doc_type: summary
+  category: Legal
+  country: All
