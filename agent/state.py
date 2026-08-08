@@ -40,6 +40,15 @@ class RetrievedChunkPayload(TypedDict, total=False):
     scores: dict[str, float]
 
 
+class RetrievalDebug(TypedDict):
+    resolved_filters: dict[str, str]
+    top_n: int
+    dense_top_k: int
+    bm25_top_k: int
+    apply_reranker: bool
+    retrieved_count: int
+
+
 class RetrievalState(TypedDict, total=False):
     question: str
     employee_context: EmployeeContext
@@ -47,4 +56,4 @@ class RetrievalState(TypedDict, total=False):
     retrieval_config: RetrievalConfig
     resolved_filters: dict[str, str]
     retrieved_chunks: list[RetrievedChunkPayload]
-    retrieval_debug: dict[str, Any]
+    retrieval_debug: RetrievalDebug

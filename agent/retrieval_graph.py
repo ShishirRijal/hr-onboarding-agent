@@ -13,7 +13,7 @@ from retrieval import (
     retrieve,
 )
 
-from .state import EmployeeContext, RetrievalConfig, RetrievalOverrides, RetrievalState
+from .state import EmployeeContext, RetrievalConfig, RetrievalDebug, RetrievalOverrides, RetrievalState
 
 DEFAULT_COUNTRY_KEYS = (
     "employee_country",
@@ -90,16 +90,18 @@ def _make_retrieve_node(
             apply_reranker=config["apply_reranker"],
         )
 
+        retrieval_debug: RetrievalDebug = {
+            "resolved_filters": filters.as_dict(),
+            "top_n": config["top_n"],
+            "dense_top_k": config["dense_top_k"],
+            "bm25_top_k": config["bm25_top_k"],
+            "apply_reranker": config["apply_reranker"],
+            "retrieved_count": len(results),
+        }
+
         return {
             "retrieved_chunks": [asdict(chunk) for chunk in results],
-            "retrieval_debug": {
-                "resolved_filters": filters.as_dict(),
-                "top_n": config["top_n"],
-                "dense_top_k": config["dense_top_k"],
-                "bm25_top_k": config["bm25_top_k"],
-                "apply_reranker": config["apply_reranker"],
-                "retrieved_count": len(results),
-            },
+            "retrieval_debug": retrieval_debug,
         }
 
     return _retrieve_node
