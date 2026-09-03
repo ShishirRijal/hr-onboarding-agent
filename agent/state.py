@@ -40,6 +40,21 @@ class RetrievedChunkPayload(TypedDict, total=False):
     scores: dict[str, float]
 
 
+class AnswerSource(TypedDict, total=False):
+    chunk_id: str
+    source_doc: str
+    source_file: str
+    section_path: str
+    page_number: int
+    row_number: int
+    score: float
+
+
+class GeneratedAnswer(TypedDict):
+    text: str
+    sources: list[AnswerSource]
+
+
 class RetrievalDebug(TypedDict):
     resolved_filters: dict[str, str]
     top_n: int
@@ -47,6 +62,14 @@ class RetrievalDebug(TypedDict):
     bm25_top_k: int
     apply_reranker: bool
     retrieved_count: int
+
+
+class ConfidenceDebug(TypedDict, total=False):
+    retrieved_count: int
+    top_score: float
+    has_answer: bool
+    has_sources: bool
+    has_rerank_signal: bool
 
 
 class RetrievalState(TypedDict, total=False):
@@ -57,3 +80,7 @@ class RetrievalState(TypedDict, total=False):
     resolved_filters: dict[str, str]
     retrieved_chunks: list[RetrievedChunkPayload]
     retrieval_debug: RetrievalDebug
+    generated_answer: GeneratedAnswer
+    confidence_score: float
+    confidence_label: str
+    confidence_debug: ConfidenceDebug
