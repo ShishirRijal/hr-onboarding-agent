@@ -13,6 +13,7 @@ from retrieval import (
     retrieve,
 )
 
+from .answering import generate_grounded_answer
 from .state import (
     AnswerSource,
     EmployeeContext,
@@ -59,7 +60,7 @@ def build_retrieval_graph(
     )
     graph.add_node(
         "generate_answer",
-        _make_generate_answer_node(answer_generator=answer_generator or _default_answer_generator),
+        _make_generate_answer_node(answer_generator=answer_generator or generate_grounded_answer),
     )
     graph.add_node("score_confidence", _score_confidence_node)
     graph.add_edge(start_token, "resolve_filters")
@@ -148,12 +149,6 @@ def _make_generate_answer_node(
         return {"generated_answer": answer}
 
     return _generate_answer_node
-
-
-def _default_answer_generator(question: str, chunks: list[dict[str, Any]]) -> str:
-    del question
-    top_chunk = chunks[0]
-    return str(top_chunk.get("text", "")).strip()
 
 
 def _build_answer_sources(chunks: list[dict[str, Any]]) -> list[AnswerSource]:

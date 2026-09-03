@@ -73,6 +73,11 @@ class FakeStateGraph:
         return FakeCompiledGraph(self.nodes, self.edges)
 
 
+def fake_answer_generator(question, chunks):
+    del question
+    return str(chunks[0]["text"])
+
+
 def test_retrieval_graph_resolves_country_from_employee_context() -> None:
     retriever = FakeRetriever()
     engine = RetrievalEngine(
@@ -84,6 +89,7 @@ def test_retrieval_graph_resolves_country_from_employee_context() -> None:
     graph = build_retrieval_graph(
         engine,
         retriever=retriever,
+        answer_generator=fake_answer_generator,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -124,6 +130,7 @@ def test_retrieval_graph_prefers_explicit_override() -> None:
     graph = build_retrieval_graph(
         engine,
         retriever=retriever,
+        answer_generator=fake_answer_generator,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -156,6 +163,7 @@ def test_retrieval_graph_ignores_remote_office_country_for_filtering() -> None:
     graph = build_retrieval_graph(
         engine,
         retriever=retriever,
+        answer_generator=fake_answer_generator,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
