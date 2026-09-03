@@ -28,6 +28,7 @@ DEFAULT_COUNTRY_KEYS = (
     "employee_country",
     "office_country",
 )
+MAX_ANSWER_SOURCES = 3
 
 
 def build_retrieval_graph(
@@ -153,15 +154,25 @@ def _make_generate_answer_node(
 
 def _build_answer_sources(chunks: list[dict[str, Any]]) -> list[AnswerSource]:
     sources: list[AnswerSource] = []
-    seen: set[str] = set()
+    seen: set[tuple[Any, ...]] = set()
 
     for chunk in chunks:
         chunk_id = str(chunk.get("chunk_id", "")).strip()
-        if not chunk_id or chunk_id in seen:
+        if not chunk_id:
             continue
 
-        seen.add(chunk_id)
         metadata = chunk.get("metadata", {}) or {}
+        source_key = (
+            metadata.get("source_file"),
+            metadata.get("source_doc"),
+            metadata.get("section_path"),
+            metadata.get("page_number"),
+            metadata.get("row_number"),
+        )
+        if source_key in seen:
+            continue
+
+        seen.add(source_key)
         source: AnswerSource = {
             "chunk_id": chunk_id,
             "score": float(chunk.get("score", 0.0) or 0.0),
@@ -172,6 +183,8 @@ def _build_answer_sources(chunks: list[dict[str, Any]]) -> list[AnswerSource]:
                 source[key] = value
 
         sources.append(source)
+        if len(sources) >= MAX_ANSWER_SOURCES:
+            break
 
     return sources
 
@@ -220,11 +233,11 @@ def _calculate_confidence_score(
 
     score = min(max(top_score, 0.0), 1.0)
     if retrieved_count >= 2:
-        score += 0.05
+        score += 0.03
     if has_rerank_signal:
-        score += 0.05
+        score += 0.04
 
-    return round(min(score, 1.0), 3)
+    return round(min(score, 0.97), 3)
 
 
 def _confidence_label(score: float) -> str:

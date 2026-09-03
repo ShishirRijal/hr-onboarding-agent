@@ -222,7 +222,7 @@ def test_retrieval_graph_uses_injected_answer_generator() -> None:
             "source_file": "leave_absence_policy.md",
         }
     ]
-    assert result["confidence_score"] == 0.96
+    assert result["confidence_score"] == 0.95
     assert result["confidence_label"] == "high"
 
 
@@ -261,3 +261,152 @@ def test_retrieval_graph_returns_low_confidence_without_chunks() -> None:
         "has_sources": False,
         "has_rerank_signal": False,
     }
+
+
+def test_retrieval_graph_deduplicates_answer_sources_by_location() -> None:
+    retriever = FakeRetriever(
+        results=[
+            RetrievedChunk(
+                chunk_id="chunk-1",
+                text="Annual leave in Estonia is 28 calendar days.",
+                metadata={
+                    "source_doc": "leave_policy",
+                    "source_file": "leave_absence_policy.md",
+                    "section_path": "Leave Policy > Estonia",
+                },
+                score=0.9,
+                source="reranked",
+                scores={"rerank": 0.9},
+            ),
+            RetrievedChunk(
+                chunk_id="chunk-2",
+                text="Leave accrues monthly.",
+                metadata={
+                    "source_doc": "leave_policy",
+                    "source_file": "leave_absence_policy.md",
+                    "section_path": "Leave Policy > Estonia",
+                },
+                score=0.7,
+                source="reranked",
+                scores={"rerank": 0.7},
+            ),
+            RetrievedChunk(
+                chunk_id="chunk-3",
+                text="Portugal annual leave is 22 working days.",
+                metadata={
+                    "source_doc": "leave_policy",
+                    "source_file": "leave_absence_policy.md",
+                    "section_path": "Leave Policy > Portugal",
+                },
+                score=0.6,
+                source="reranked",
+                scores={"rerank": 0.6},
+            ),
+            RetrievedChunk(
+                chunk_id="chunk-4",
+                text="Tampere employees follow Finnish annual holiday rules.",
+                metadata={
+                    "source_doc": "leave_policy",
+                    "source_file": "leave_absence_policy.md",
+                    "section_path": "Leave Policy > Finland",
+                },
+                score=0.5,
+                source="reranked",
+                scores={"rerank": 0.5},
+            ),
+            RetrievedChunk(
+                chunk_id="chunk-5",
+                text="Sick leave requires manager and HR notice.",
+                metadata={
+                    "source_doc": "leave_policy",
+                    "source_file": "leave_absence_policy.md",
+                    "section_path": "Leave Policy > Sick Leave",
+                },
+                score=0.4,
+                source="reranked",
+                scores={"rerank": 0.4},
+            ),
+        ]
+    )
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    graph = build_retrieval_graph(
+        engine,
+        retriever=retriever,
+        answer_generator=fake_answer_generator,
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+    result = graph.invoke({"question": "How much annual leave do I get?"})
+
+    assert result["generated_answer"]["sources"] == [
+        {
+            "chunk_id": "chunk-1",
+            "score": 0.9,
+            "source_doc": "leave_policy",
+            "source_file": "leave_absence_policy.md",
+            "section_path": "Leave Policy > Estonia",
+        },
+        {
+            "chunk_id": "chunk-3",
+            "score": 0.6,
+            "source_doc": "leave_policy",
+            "source_file": "leave_absence_policy.md",
+            "section_path": "Leave Policy > Portugal",
+        },
+        {
+            "chunk_id": "chunk-4",
+            "score": 0.5,
+            "source_doc": "leave_policy",
+            "source_file": "leave_absence_policy.md",
+            "section_path": "Leave Policy > Finland",
+        },
+    ]
+
+
+def test_retrieval_graph_caps_confidence_below_perfect_score() -> None:
+    retriever = FakeRetriever(
+        results=[
+            RetrievedChunk(
+                chunk_id="chunk-1",
+                text="Annual leave in Estonia is 28 calendar days.",
+                metadata={"source_doc": "leave_policy"},
+                score=0.99,
+                source="reranked",
+                scores={"rerank": 0.99},
+            ),
+            RetrievedChunk(
+                chunk_id="chunk-2",
+                text="Annual leave accrues monthly.",
+                metadata={"source_doc": "leave_policy", "section_path": "Accrual"},
+                score=0.8,
+                source="reranked",
+                scores={"rerank": 0.8},
+            ),
+        ]
+    )
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    graph = build_retrieval_graph(
+        engine,
+        retriever=retriever,
+        answer_generator=fake_answer_generator,
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+    result = graph.invoke({"question": "How much annual leave do I get?"})
+
+    assert result["confidence_score"] == 0.97
+    assert result["confidence_label"] == "high"
