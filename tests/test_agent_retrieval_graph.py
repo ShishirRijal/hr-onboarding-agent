@@ -7,8 +7,9 @@ from retrieval import RetrievedChunk, RetrievalEngine
 
 
 class FakeRetriever:
-    def __init__(self) -> None:
+    def __init__(self, results: list[RetrievedChunk] | None = None) -> None:
         self.calls: list[dict[str, object]] = []
+        self.results = results
 
     def __call__(self, engine, query, **kwargs):
         self.calls.append(
@@ -18,6 +19,9 @@ class FakeRetriever:
                 "kwargs": kwargs,
             }
         )
+        if self.results is not None:
+            return self.results
+
         return [
             RetrievedChunk(
                 chunk_id="chunk-1",
@@ -69,6 +73,11 @@ class FakeStateGraph:
         return FakeCompiledGraph(self.nodes, self.edges)
 
 
+def fake_answer_generator(question, chunks):
+    del question
+    return str(chunks[0]["text"])
+
+
 def test_retrieval_graph_resolves_country_from_employee_context() -> None:
     retriever = FakeRetriever()
     engine = RetrievalEngine(
@@ -80,6 +89,7 @@ def test_retrieval_graph_resolves_country_from_employee_context() -> None:
     graph = build_retrieval_graph(
         engine,
         retriever=retriever,
+        answer_generator=fake_answer_generator,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -103,6 +113,10 @@ def test_retrieval_graph_resolves_country_from_employee_context() -> None:
     assert result["retrieval_debug"]["retrieved_count"] == 1
     assert result["retrieved_chunks"][0]["metadata"]["country"] == "Estonia"
     assert result["retrieved_chunks"][0]["source"] == "reranked"
+    assert result["generated_answer"]["text"] == "Annual leave in Estonia is 28 calendar days."
+    assert result["generated_answer"]["sources"][0]["source_file"] == "leave_absence_policy.md"
+    assert result["confidence_label"] == "high"
+    assert result["confidence_debug"]["has_rerank_signal"] is True
 
 
 def test_retrieval_graph_prefers_explicit_override() -> None:
@@ -116,6 +130,7 @@ def test_retrieval_graph_prefers_explicit_override() -> None:
     graph = build_retrieval_graph(
         engine,
         retriever=retriever,
+        answer_generator=fake_answer_generator,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -148,6 +163,7 @@ def test_retrieval_graph_ignores_remote_office_country_for_filtering() -> None:
     graph = build_retrieval_graph(
         engine,
         retriever=retriever,
+        answer_generator=fake_answer_generator,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -163,3 +179,234 @@ def test_retrieval_graph_ignores_remote_office_country_for_filtering() -> None:
     call_kwargs = retriever.calls[0]["kwargs"]
     assert call_kwargs["filters"] is None
     assert result["resolved_filters"] == {}
+
+
+def test_retrieval_graph_uses_injected_answer_generator() -> None:
+    retriever = FakeRetriever()
+    answer_generator_calls: list[dict[str, object]] = []
+
+    def answer_generator(question, chunks):
+        answer_generator_calls.append({"question": question, "chunks": chunks})
+        return "Employees in Estonia receive 28 calendar days of annual leave."
+
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    graph = build_retrieval_graph(
+        engine,
+        retriever=retriever,
+        answer_generator=answer_generator,
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+    result = graph.invoke(
+        {
+            "question": "How much annual leave do I get?",
+            "employee_context": {"employee_country": "Estonia"},
+        }
+    )
+
+    assert answer_generator_calls
+    assert answer_generator_calls[0]["question"] == "How much annual leave do I get?"
+    assert result["generated_answer"]["text"] == "Employees in Estonia receive 28 calendar days of annual leave."
+    assert result["generated_answer"]["sources"] == [
+        {
+            "chunk_id": "chunk-1",
+            "score": 0.91,
+            "source_doc": "leave_policy",
+            "source_file": "leave_absence_policy.md",
+        }
+    ]
+    assert result["confidence_score"] == 0.95
+    assert result["confidence_label"] == "high"
+
+
+def test_retrieval_graph_returns_low_confidence_without_chunks() -> None:
+    retriever = FakeRetriever(results=[])
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    graph = build_retrieval_graph(
+        engine,
+        retriever=retriever,
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+    result = graph.invoke(
+        {
+            "question": "Can I work from another country for six months?",
+            "employee_context": {"employee_country": "Estonia"},
+        }
+    )
+
+    assert result["retrieved_chunks"] == []
+    assert result["generated_answer"]["sources"] == []
+    assert "could not find enough information" in result["generated_answer"]["text"]
+    assert result["confidence_score"] == 0.0
+    assert result["confidence_label"] == "low"
+    assert result["confidence_debug"] == {
+        "retrieved_count": 0,
+        "top_score": 0.0,
+        "has_answer": True,
+        "has_sources": False,
+        "has_rerank_signal": False,
+    }
+
+
+def test_retrieval_graph_deduplicates_answer_sources_by_location() -> None:
+    retriever = FakeRetriever(
+        results=[
+            RetrievedChunk(
+                chunk_id="chunk-1",
+                text="Annual leave in Estonia is 28 calendar days.",
+                metadata={
+                    "source_doc": "leave_policy",
+                    "source_file": "leave_absence_policy.md",
+                    "section_path": "Leave Policy > Estonia",
+                },
+                score=0.9,
+                source="reranked",
+                scores={"rerank": 0.9},
+            ),
+            RetrievedChunk(
+                chunk_id="chunk-2",
+                text="Leave accrues monthly.",
+                metadata={
+                    "source_doc": "leave_policy",
+                    "source_file": "leave_absence_policy.md",
+                    "section_path": "Leave Policy > Estonia",
+                },
+                score=0.7,
+                source="reranked",
+                scores={"rerank": 0.7},
+            ),
+            RetrievedChunk(
+                chunk_id="chunk-3",
+                text="Portugal annual leave is 22 working days.",
+                metadata={
+                    "source_doc": "leave_policy",
+                    "source_file": "leave_absence_policy.md",
+                    "section_path": "Leave Policy > Portugal",
+                },
+                score=0.6,
+                source="reranked",
+                scores={"rerank": 0.6},
+            ),
+            RetrievedChunk(
+                chunk_id="chunk-4",
+                text="Tampere employees follow Finnish annual holiday rules.",
+                metadata={
+                    "source_doc": "leave_policy",
+                    "source_file": "leave_absence_policy.md",
+                    "section_path": "Leave Policy > Finland",
+                },
+                score=0.5,
+                source="reranked",
+                scores={"rerank": 0.5},
+            ),
+            RetrievedChunk(
+                chunk_id="chunk-5",
+                text="Sick leave requires manager and HR notice.",
+                metadata={
+                    "source_doc": "leave_policy",
+                    "source_file": "leave_absence_policy.md",
+                    "section_path": "Leave Policy > Sick Leave",
+                },
+                score=0.4,
+                source="reranked",
+                scores={"rerank": 0.4},
+            ),
+        ]
+    )
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    graph = build_retrieval_graph(
+        engine,
+        retriever=retriever,
+        answer_generator=fake_answer_generator,
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+    result = graph.invoke({"question": "How much annual leave do I get?"})
+
+    assert result["generated_answer"]["sources"] == [
+        {
+            "chunk_id": "chunk-1",
+            "score": 0.9,
+            "source_doc": "leave_policy",
+            "source_file": "leave_absence_policy.md",
+            "section_path": "Leave Policy > Estonia",
+        },
+        {
+            "chunk_id": "chunk-3",
+            "score": 0.6,
+            "source_doc": "leave_policy",
+            "source_file": "leave_absence_policy.md",
+            "section_path": "Leave Policy > Portugal",
+        },
+        {
+            "chunk_id": "chunk-4",
+            "score": 0.5,
+            "source_doc": "leave_policy",
+            "source_file": "leave_absence_policy.md",
+            "section_path": "Leave Policy > Finland",
+        },
+    ]
+
+
+def test_retrieval_graph_caps_confidence_below_perfect_score() -> None:
+    retriever = FakeRetriever(
+        results=[
+            RetrievedChunk(
+                chunk_id="chunk-1",
+                text="Annual leave in Estonia is 28 calendar days.",
+                metadata={"source_doc": "leave_policy"},
+                score=0.99,
+                source="reranked",
+                scores={"rerank": 0.99},
+            ),
+            RetrievedChunk(
+                chunk_id="chunk-2",
+                text="Annual leave accrues monthly.",
+                metadata={"source_doc": "leave_policy", "section_path": "Accrual"},
+                score=0.8,
+                source="reranked",
+                scores={"rerank": 0.8},
+            ),
+        ]
+    )
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    graph = build_retrieval_graph(
+        engine,
+        retriever=retriever,
+        answer_generator=fake_answer_generator,
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+    result = graph.invoke({"question": "How much annual leave do I get?"})
+
+    assert result["confidence_score"] == 0.97
+    assert result["confidence_label"] == "high"

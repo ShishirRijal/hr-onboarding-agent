@@ -145,3 +145,40 @@ The build order is also intentional: document ingestion comes first, then retrie
 - Streamlit for the UI
 - APScheduler for weekly digests
 - SQLite and SQLAlchemy for interaction logging
+
+## Run the Agent Locally
+
+Create a `.env` file from `.env.example` and set at least:
+
+```bash
+OPENAI_API_KEY=sk-...
+QDRANT_URL=http://localhost:6333
+QDRANT_COLLECTION=nordtech_hr
+```
+
+`COHERE_API_KEY` is optional. Without it, use `--no-rerank` when asking questions.
+
+Start Qdrant and ingest the corpus:
+
+```bash
+docker compose up -d
+PYTHONPATH=. poetry run python scripts/ingest.py
+```
+
+Ask the full retrieval + answer + confidence graph:
+
+```bash
+PYTHONPATH=. poetry run python scripts/ask_agent.py "How much annual leave do I get in Estonia?" --employee-country Estonia
+```
+
+Without Cohere reranking:
+
+```bash
+PYTHONPATH=. poetry run python scripts/ask_agent.py "How much annual leave do I get in Estonia?" --employee-country Estonia --no-rerank
+```
+
+Run tests:
+
+```bash
+PYTHONPATH=. poetry run pytest
+```
