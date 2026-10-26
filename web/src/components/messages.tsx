@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import Markdown from "react-markdown";
 import { documentTitle, sectionLabel } from "@/lib/documents";
 import type { AssistantMessage, Source, UserMessage } from "@/lib/types";
+import { usePacedCount, useSmoothText } from "@/lib/use-reveal";
 import { AssistantMark } from "./assistant-mark";
 import { ProgressSteps } from "./progress-steps";
 
@@ -16,23 +18,44 @@ export function UserBubble({ message }: { message: UserMessage }) {
   );
 }
 
+// How long each progress step stays current before the next one, or the answer, takes over.
+const STEP_MS = 650;
+
 export function AssistantReply({
   message,
+  latest,
   onRetry,
   onChooseHr,
 }: {
   message: AssistantMessage;
+  latest: boolean;
   onRetry: () => void;
   onChooseHr: (askHr: boolean) => void;
 }) {
-  const working = message.status === "pending" || message.status === "streaming";
+  // Replies loaded from history appear as they are; only replies written now are animated.
+  const [live] = useState(() => message.status === "pending" || message.status === "streaming");
+  const [startedAt] = useState(() => Date.now());
+
+  // The answer counts as one more step, so it waits until the last step has been seen.
+  const hasText = message.status !== "pending";
+  const shown = usePacedCount(message.steps.length + (hasText ? 1 : 0), STEP_MS);
+  const thinking = live && message.status !== "error" && (!hasText || shown <= message.steps.length);
+
+  const text = useSmoothText(thinking ? "" : message.text, live && message.status !== "error");
+  const typing = !thinking && (message.status === "streaming" || text.length < message.text.length);
 
   return (
     <div className="flex gap-3">
-      <AssistantMark active={working} />
+      <AssistantMark state={thinking || typing ? "working" : latest ? "idle" : "still"} />
       <div className="min-w-0 flex-1 pt-0.5">
-        <ProgressSteps steps={message.steps} working={message.status === "pending"} />
-        <ReplyBody message={message} onRetry={onRetry} onChooseHr={onChooseHr} />
+        <ProgressSteps
+          steps={live ? message.steps.slice(0, shown) : message.steps}
+          working={thinking}
+          startedAt={startedAt}
+        />
+        {!thinking && (
+          <ReplyBody message={message} text={text} typing={typing} onRetry={onRetry} onChooseHr={onChooseHr} />
+        )}
       </div>
     </div>
   );
@@ -40,15 +63,17 @@ export function AssistantReply({
 
 function ReplyBody({
   message,
+  text,
+  typing,
   onRetry,
   onChooseHr,
 }: {
   message: AssistantMessage;
+  text: string;
+  typing: boolean;
   onRetry: () => void;
   onChooseHr: (askHr: boolean) => void;
 }) {
-  if (message.status === "pending") return null;
-
   if (message.status === "error") {
     return (
       <div className="rounded-lg border-l-4 border-alert bg-alert-wash px-4 py-3">
@@ -66,26 +91,38 @@ function ReplyBody({
   }
 
   if (message.status === "done" && !message.answered) {
-    return <NotFound message={message} onChooseHr={onChooseHr} />;
+    return <NotFound message={message} text={text} typing={typing} onChooseHr={onChooseHr} />;
   }
 
   return (
     <div>
-      <div className="answer">
-        <Markdown>{message.text}</Markdown>
+      <div className={`answer ${typing ? "is-typing" : ""}`}>
+        <Markdown>{text}</Markdown>
       </div>
-      {message.status === "done" && message.sources.length > 0 && <SourceList sources={message.sources} />}
+      {!typing && message.status === "done" && message.sources.length > 0 && <SourceList sources={message.sources} />}
     </div>
   );
 }
 
-function NotFound({ message, onChooseHr }: { message: AssistantMessage; onChooseHr: (askHr: boolean) => void }) {
+function NotFound({
+  message,
+  text,
+  typing,
+  onChooseHr,
+}: {
+  message: AssistantMessage;
+  text: string;
+  typing: boolean;
+  onChooseHr: (askHr: boolean) => void;
+}) {
   return (
     <div>
-      <p className="answer">{message.text}</p>
+      <div className={`answer ${typing ? "is-typing" : ""}`}>
+        <p>{text}</p>
+      </div>
 
-      {(message.hrStatus === "offered" || message.hrStatus === "sending") && (
-        <div className="mt-3 flex flex-wrap gap-2">
+      {!typing && (message.hrStatus === "offered" || message.hrStatus === "sending") && (
+        <div className="step-in mt-3 flex flex-wrap gap-2">
           <button
             type="button"
             disabled={message.hrStatus === "sending"}
@@ -109,7 +146,7 @@ function NotFound({ message, onChooseHr }: { message: AssistantMessage; onChoose
       )}
 
       {message.hrStatus === "requested" && (
-        <div className="mt-3 rounded-lg border-l-4 border-lamp-line bg-lamp-wash px-4 py-2.5">
+        <div className="step-in mt-3 rounded-lg border-l-4 border-lamp-line bg-lamp-wash px-4 py-2.5">
           <p className="font-semibold text-lamp">Sent to HR</p>
           <p className="mt-0.5 text-sm text-ink">
             {message.hrMessage ?? "Your question was sent to the HR team."}
@@ -118,7 +155,7 @@ function NotFound({ message, onChooseHr }: { message: AssistantMessage; onChoose
       )}
 
       {message.hrStatus === "declined" && (
-        <p className="mt-3 text-sm text-ink-soft">{message.hrMessage ?? "Not sent to HR."}</p>
+        <p className="step-in mt-3 text-sm text-ink-soft">{message.hrMessage ?? "Not sent to HR."}</p>
       )}
     </div>
   );
@@ -126,7 +163,7 @@ function NotFound({ message, onChooseHr }: { message: AssistantMessage; onChoose
 
 function SourceList({ sources }: { sources: Source[] }) {
   return (
-    <div className="mt-4">
+    <div className="step-in mt-4">
       <h3 className="text-sm text-ink-soft">
         From {sources.length === 1 ? "1 policy section" : `${sources.length} policy sections`}
       </h3>
