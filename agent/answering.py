@@ -4,9 +4,13 @@ import os
 from typing import Any
 
 DEFAULT_ANSWER_MODEL = "gpt-4o-mini"
-SYSTEM_PROMPT = """You are NordTech Solutions' HR onboarding assistant.
+INSUFFICIENT_CONTEXT_MARKER = "INSUFFICIENT_CONTEXT"
+NO_ANSWER_MESSAGE = (
+    "I could not find enough information in the HR knowledge base to answer this question reliably."
+)
+SYSTEM_PROMPT = f"""You are NordTech Solutions' HR onboarding assistant.
 Answer only from the provided HR knowledge base excerpts.
-If the excerpts do not contain enough information, say that the HR knowledge base does not contain enough information to answer reliably.
+If the excerpts do not contain enough information to answer the question, reply with exactly {INSUFFICIENT_CONTEXT_MARKER} and nothing else.
 Do not invent policy details, dates, amounts, approvals, or contacts.
 Keep the answer concise and practical."""
 
@@ -19,15 +23,16 @@ def generate_grounded_answer(
     model: str = DEFAULT_ANSWER_MODEL,
 ) -> str:
     if not chunks:
-        return (
-            "I could not find enough information in the HR knowledge base to answer this "
-            "question reliably."
-        )
+        return NO_ANSWER_MESSAGE
 
     client = llm or _load_default_llm(model=model)
     response = client.invoke(_build_messages(question, chunks))
     content = getattr(response, "content", response)
     return str(content).strip()
+
+
+def is_insufficient_answer(text: str) -> bool:
+    return INSUFFICIENT_CONTEXT_MARKER in text
 
 
 def _load_default_llm(*, model: str = DEFAULT_ANSWER_MODEL) -> Any:

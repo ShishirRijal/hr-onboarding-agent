@@ -13,7 +13,7 @@ from retrieval import (
     retrieve,
 )
 
-from .answering import generate_grounded_answer
+from .answering import NO_ANSWER_MESSAGE, generate_grounded_answer, is_insufficient_answer
 from .escalation import ESCALATION_MESSAGE, build_hr_escalation
 from .state import (
     AnswerSource,
@@ -32,6 +32,15 @@ DEFAULT_COUNTRY_KEYS = (
 )
 MAX_ANSWER_SOURCES = 3
 ESCALATE_CONFIDENCE_LABELS = frozenset({"low"})
+HIGH_CONFIDENCE = 0.75
+MEDIUM_CONFIDENCE = 0.45
+# Without a reranker, confidence comes from BGE cosine similarity, which is a weak
+# relevance signal: answerable and unanswerable FAQ questions overlap between ~0.58 and
+# ~0.74. Only clearly off-topic retrievals (below the floor) escalate on similarity alone,
+# the rest relies on the answer model declining, and unreranked answers top out at medium.
+DENSE_SIMILARITY_FLOOR = 0.50
+DENSE_SIMILARITY_CEILING = 0.85
+MAX_UNRERANKED_CONFIDENCE = 0.74
 
 
 def build_retrieval_graph(
@@ -145,20 +154,16 @@ def _make_generate_answer_node(
         chunks = state.get("retrieved_chunks", [])
 
         if not chunks:
-            answer: GeneratedAnswer = {
-                "text": (
-                    "I could not find enough information in the HR knowledge base to answer this "
-                    "question reliably."
-                ),
-                "sources": [],
-            }
-            return {"generated_answer": answer}
+            answer: GeneratedAnswer = {"text": NO_ANSWER_MESSAGE, "sources": []}
+            return {"generated_answer": answer, "answer_declined": True}
 
+        text = answer_generator(question, chunks).strip()
+        answer_declined = is_insufficient_answer(text)
         answer = {
-            "text": answer_generator(question, chunks).strip(),
+            "text": NO_ANSWER_MESSAGE if answer_declined else text,
             "sources": _build_answer_sources(chunks),
         }
-        return {"generated_answer": answer}
+        return {"generated_answer": answer, "answer_declined": answer_declined}
 
     return _generate_answer_node
 
@@ -206,16 +211,23 @@ def _score_confidence_node(state: RetrievalState) -> dict[str, Any]:
     top_chunk = chunks[0] if chunks else {}
     scores = top_chunk.get("scores", {}) if top_chunk else {}
     top_score = float(top_chunk.get("score", 0.0) or 0.0)
+    top_dense_score = max(
+        (float((chunk.get("scores", {}) or {}).get("dense", 0.0) or 0.0) for chunk in chunks),
+        default=0.0,
+    )
     has_answer = bool(str(generated_answer.get("text", "")).strip())
     has_sources = bool(generated_answer.get("sources", []))
     has_rerank_signal = "rerank" in scores
+    answer_declined = bool(state.get("answer_declined", False))
 
     confidence_score = _calculate_confidence_score(
         retrieved_count=len(chunks),
         top_score=top_score,
+        top_dense_score=top_dense_score,
         has_answer=has_answer,
         has_sources=has_sources,
         has_rerank_signal=has_rerank_signal,
+        answer_declined=answer_declined,
     )
 
     return {
@@ -224,23 +236,37 @@ def _score_confidence_node(state: RetrievalState) -> dict[str, Any]:
         "confidence_debug": {
             "retrieved_count": len(chunks),
             "top_score": top_score,
+            "top_dense_score": top_dense_score,
+            "score_basis": _score_basis(len(chunks), has_rerank_signal),
             "has_answer": has_answer,
             "has_sources": has_sources,
             "has_rerank_signal": has_rerank_signal,
+            "answer_declined": answer_declined,
         },
     }
+
+
+def _score_basis(retrieved_count: int, has_rerank_signal: bool) -> str:
+    if retrieved_count == 0:
+        return "none"
+    return "rerank" if has_rerank_signal else "dense"
 
 
 def _calculate_confidence_score(
     *,
     retrieved_count: int,
     top_score: float,
+    top_dense_score: float,
     has_answer: bool,
     has_sources: bool,
     has_rerank_signal: bool,
+    answer_declined: bool,
 ) -> float:
-    if retrieved_count == 0 or not has_answer or not has_sources:
+    if retrieved_count == 0 or not has_answer or not has_sources or answer_declined:
         return 0.0
+
+    if not has_rerank_signal:
+        return _dense_confidence(top_dense_score)
 
     score = min(max(top_score, 0.0), 1.0)
     if retrieved_count >= 2:
@@ -279,10 +305,20 @@ def _escalate_to_hr_node(state: RetrievalState) -> dict[str, Any]:
     }
 
 
+def _dense_confidence(similarity: float) -> float:
+    if similarity < DENSE_SIMILARITY_FLOOR:
+        return round(max(similarity, 0.0) / DENSE_SIMILARITY_FLOOR * MEDIUM_CONFIDENCE * 0.99, 3)
+
+    position = (min(similarity, DENSE_SIMILARITY_CEILING) - DENSE_SIMILARITY_FLOOR) / (
+        DENSE_SIMILARITY_CEILING - DENSE_SIMILARITY_FLOOR
+    )
+    return round(MEDIUM_CONFIDENCE + position * (MAX_UNRERANKED_CONFIDENCE - MEDIUM_CONFIDENCE), 3)
+
+
 def _confidence_label(score: float) -> str:
-    if score >= 0.75:
+    if score >= HIGH_CONFIDENCE:
         return "high"
-    if score >= 0.45:
+    if score >= MEDIUM_CONFIDENCE:
         return "medium"
     return "low"
 

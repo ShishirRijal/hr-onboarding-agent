@@ -67,9 +67,12 @@ class RetrievalDebug(TypedDict):
 class ConfidenceDebug(TypedDict, total=False):
     retrieved_count: int
     top_score: float
+    top_dense_score: float
+    score_basis: str
     has_answer: bool
     has_sources: bool
     has_rerank_signal: bool
+    answer_declined: bool
 
 
 class HREscalation(TypedDict):
@@ -98,6 +101,7 @@ class RetrievalState(TypedDict, total=False):
     retrieved_chunks: list[RetrievedChunkPayload]
     retrieval_debug: RetrievalDebug
     generated_answer: GeneratedAnswer
+    answer_declined: bool
     confidence_score: float
     confidence_label: str
     confidence_debug: ConfidenceDebug
