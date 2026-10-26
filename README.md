@@ -230,3 +230,20 @@ The script prints the answer, confidence, sources, and for escalated questions t
 ```bash
 PYTHONPATH=. poetry run pytest
 ```
+
+### Evaluating answers
+
+`scripts/eval_answers.py` runs the real agent on every question in `corpus/hr_faq_log.csv` and on the multi-turn conversations in `evaluation/conversations.yaml` (greetings, follow-ups, other countries, everyday words, off-topic, questions the documents don't cover), then checks each reply:
+
+- **Behaviour**: answered, offered to ask HR, or chatted, as expected
+- **Cited the right document** and **searched the right country**
+- **Correctness** against the expected answer, and **grounding** (every claim backed by the sections the answer was written from), both graded by a stronger model (`gpt-4.1` by default)
+
+```bash
+PYTHONPATH=. poetry run python scripts/eval_answers.py                      # everything, about 6 minutes
+PYTHONPATH=. poetry run python scripts/eval_answers.py --cases conversations --limit 3
+PYTHONPATH=. poetry run python scripts/eval_answers.py --answer-model gpt-4.1-mini --out-dir data/evaluations/gpt-4.1-mini
+PYTHONPATH=. poetry run python scripts/eval_answers.py --no-judge          # free checks only
+```
+
+Each run prints a summary next to the previous run's numbers and saves a JSON and a Markdown report to `data/evaluations/`; the Markdown lists every failing turn with what was expected, what the agent said, and why it failed. Evaluation runs don't write to the interactions database.
