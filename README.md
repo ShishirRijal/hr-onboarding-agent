@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-Agent-0A0D14)](https://langchain-ai.github.io/langgraph/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![Next.js](https://img.shields.io/badge/Next.js-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![Qdrant](https://img.shields.io/badge/Qdrant-FF6F61?logo=qdrant&logoColor=white)](https://qdrant.tech/)
 [![Poetry](https://img.shields.io/badge/Poetry-60A5FA?logo=poetry&logoColor=white)](https://python-poetry.org/)
 
@@ -80,7 +80,7 @@ This setup keeps the agent simple: one brain, a few clearly separated responsibi
 
 ```mermaid
 flowchart TD
-  E[Employee] --> UI[Streamlit UI]
+  E[Employee] --> UI[Next.js web app]
   UI --> API[FastAPI POST /chat]
   API --> AG[LangGraph Agent]
 
@@ -144,11 +144,11 @@ The build order is also intentional: document ingestion comes first, then retrie
 - LangChain for document and retrieval primitives
 - Qdrant for vector search
 - FastAPI for the API
-- Streamlit for the UI
+- Next.js (React, TypeScript, Tailwind CSS) for the web app
 - APScheduler for weekly digests
 - SQLite and SQLAlchemy for interaction logging
 
-## Run the Agent Locally
+## Run It Locally
 
 Create a `.env` file from `.env.example` and set at least:
 
@@ -158,30 +158,50 @@ QDRANT_URL=http://localhost:6333
 QDRANT_COLLECTION=nordtech_hr
 ```
 
-`COHERE_API_KEY` is optional. Without it, use `--no-rerank` when asking questions.
+`COHERE_API_KEY` is optional. The API runs without Cohere reranking unless `USE_COHERE_RERANK=true` (the trial key is limited to 10 calls a minute).
 
-Start Qdrant and ingest the corpus:
+**1. Start Qdrant and ingest the corpus**
 
 ```bash
 docker compose up -d
 PYTHONPATH=. poetry run python scripts/ingest.py
 ```
 
-Ask the full retrieval + answer + confidence graph:
+**2. Start the API** (port 8010)
 
 ```bash
-PYTHONPATH=. poetry run python scripts/ask_agent.py "How much annual leave do I get in Estonia?" --employee-country Estonia
+PYTHONPATH=. poetry run uvicorn api.main:app --port 8010
 ```
 
-High- and medium-confidence answers are returned to the employee with sources. Low-confidence questions are escalated: the employee is pointed to HR, and the script prints the escalation reason plus the draft answer that was withheld.
+- `POST /chat` answers a question: `{"message": "...", "session_id": "...", "employee_context": {"employee_country": "Estonia"}}`
+- `GET /sessions/{session_id}/messages` returns a chat's history
+- `GET /health`
 
-Without Cohere reranking:
+Every question and answer is logged to `data/interactions.db`; escalated questions are the rows with `escalated = 1`.
+
+**3. Start the web app** (port 3000)
 
 ```bash
-PYTHONPATH=. poetry run python scripts/ask_agent.py "How much annual leave do I get in Estonia?" --employee-country Estonia --no-rerank
+cd web
+npm install
+npm run dev
 ```
 
-Run tests:
+Open http://localhost:3000. The web app proxies `/api/*` to the API; set `HR_API_URL` if the API runs somewhere other than `http://localhost:8010`.
+
+High- and medium-confidence answers are shown with their sources. Low-confidence questions, and questions the documents don't cover, are logged for HR and the employee is told so.
+
+### Command line
+
+Ask the agent directly, without the API or web app:
+
+```bash
+PYTHONPATH=. poetry run python scripts/ask_agent.py "How much annual leave do I get?" --employee-country Estonia --no-rerank
+```
+
+The script prints the answer, confidence, sources, and for escalated questions the reason plus the draft answer that was withheld.
+
+### Tests
 
 ```bash
 PYTHONPATH=. poetry run pytest
