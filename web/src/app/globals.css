@@ -11,6 +11,7 @@
   --color-baltic: #2e5e7e;
   --color-baltic-deep: #234a64;
   --color-baltic-wash: #e4edf3;
+  --color-cite: #d5e7f3;
   --color-lamp: #8a5a12;
   --color-lamp-line: #b7791f;
   --color-lamp-wash: #fbf3e2;
@@ -76,6 +77,125 @@ body {
   color: var(--color-baltic);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+/* A source document opened beside the chat. */
+.document h1,
+.document h2,
+.document h3,
+.document h4 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--color-ink);
+}
+
+.document h1 {
+  font-size: 1.375rem;
+}
+
+.document h2 {
+  font-size: 1.125rem;
+  margin-top: 1.6em;
+}
+
+.document h3,
+.document h4 {
+  font-size: 1rem;
+  margin-top: 1.3em;
+}
+
+.document hr {
+  border-color: var(--color-birch);
+  margin: 1.5em 0;
+}
+
+.document table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.document th,
+.document td {
+  border-bottom: 1px solid var(--color-birch);
+  padding: 0.4em 0.6em 0.4em 0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.document th {
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+
+.document blockquote {
+  border-left: 3px solid var(--color-birch);
+  padding-left: 1em;
+  color: var(--color-ink-soft);
+}
+
+.document code {
+  font-size: 0.9em;
+  background: var(--color-ice);
+  border-radius: 4px;
+  padding: 0.1em 0.3em;
+}
+
+/* The part of a document an answer was drawn from: a highlighter stroke with a margin mark. */
+@keyframes cite-flash {
+  from {
+    background-color: #a9cfe6;
+  }
+}
+
+.cited {
+  position: relative;
+  background-color: var(--color-cite);
+  box-shadow: 0 0 0 0.3rem var(--color-cite);
+  border-radius: 2px;
+  animation: cite-flash 1.4s ease-out;
+}
+
+.cited::before {
+  content: "";
+  position: absolute;
+  top: -0.3rem;
+  bottom: -0.3rem;
+  left: -1.1rem;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--color-baltic);
+}
+
+li.cited::before {
+  left: -2.35rem;
+}
+
+.cited .cited {
+  box-shadow: none;
+  animation: none;
+}
+
+.cited .cited::before,
+tr.cited::before {
+  content: none;
+}
+
+tr.cited {
+  box-shadow: none;
+}
+
+@keyframes panel-in {
+  from {
+    transform: translateX(1.5rem);
+    opacity: 0;
+  }
+}
+
+.source-panel {
+  animation: panel-in 260ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
 @keyframes greet {
@@ -289,7 +409,9 @@ body {
   .shimmer,
   .step-in,
   .check-draw path,
-  .answer.is-typing *::after {
+  .answer.is-typing *::after,
+  .cited,
+  .source-panel {
     animation: none;
   }
 

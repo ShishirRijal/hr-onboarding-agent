@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, fetchSessionMessages, requestHr, streamMessage } from "@/lib/api";
 import { useAppState } from "@/lib/app-state";
-import type { AssistantMessage, ChatMessage, ProgressStep, SessionMessage } from "@/lib/types";
+import type { AssistantMessage, ChatMessage, ProgressStep, SessionMessage, Source } from "@/lib/types";
 import { Composer } from "./composer";
 import { EmptyState } from "./empty-state";
 import { AssistantReply, UserBubble } from "./messages";
+import { SourcePanel } from "./source-panel";
 
 function historyToMessages(history: SessionMessage[]): ChatMessage[] {
   return history.flatMap((item) => [
@@ -39,6 +40,13 @@ function withStep(steps: ProgressStep[], step: ProgressStep): ProgressStep[] {
 export function ChatView({ sessionId }: { sessionId: string | null }) {
   const { office, saveSession, setActiveSessionId } = useAppState();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // The source open beside the chat, and the chip that opened it so focus can go back there.
+  const [openSource, setOpenSource] = useState<{ source: Source; messageId: string } | null>(null);
+  const sourceOpenerRef = useRef<HTMLElement | null>(null);
+  const closeSource = useCallback(() => {
+    setOpenSource(null);
+    sourceOpenerRef.current?.focus();
+  }, []);
   const [historyState, setHistoryState] = useState<"loading" | "ready" | "error">(
     sessionId ? "loading" : "ready",
   );
@@ -181,44 +189,56 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto">
-        <div ref={contentRef} className="mx-auto w-full max-w-[46rem] px-4 sm:px-6">
-          {historyState === "loading" && <p className="pending pt-10 text-ink-soft">Loading this chat…</p>}
-          {historyState === "error" && (
-            <p className="pt-10 text-ink-soft">
-              This chat couldn&apos;t be loaded. Check that the API is running, then reload the page.
-            </p>
-          )}
-          {historyState === "ready" && messages.length === 0 && <EmptyState onAsk={send} />}
-          {messages.length > 0 && (
-            <ol aria-live="polite" className="space-y-7 py-8">
-              {messages.map((message, index) => (
-                <li key={message.id}>
-                  {message.role === "user" ? (
-                    <UserBubble message={message} />
-                  ) : (
-                    <AssistantReply
-                      message={message}
-                      latest={index === messages.length - 1}
-                      onRetry={() => retry(message)}
-                      onChooseHr={(askHr) => void chooseHr(message, askHr)}
-                    />
-                  )}
-                </li>
-              ))}
-            </ol>
-          )}
+    <div className="flex min-h-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto">
+          <div ref={contentRef} className="mx-auto w-full max-w-[46rem] px-4 sm:px-6">
+            {historyState === "loading" && <p className="pending pt-10 text-ink-soft">Loading this chat…</p>}
+            {historyState === "error" && (
+              <p className="pt-10 text-ink-soft">
+                This chat couldn&apos;t be loaded. Check that the API is running, then reload the page.
+              </p>
+            )}
+            {historyState === "ready" && messages.length === 0 && <EmptyState onAsk={send} />}
+            {messages.length > 0 && (
+              <ol aria-live="polite" className="space-y-7 py-8">
+                {messages.map((message, index) => (
+                  <li key={message.id}>
+                    {message.role === "user" ? (
+                      <UserBubble message={message} />
+                    ) : (
+                      <AssistantReply
+                        message={message}
+                        latest={index === messages.length - 1}
+                        openChunkId={openSource?.messageId === message.id ? openSource.source.chunk_id : null}
+                        onRetry={() => retry(message)}
+                        onChooseHr={(askHr) => void chooseHr(message, askHr)}
+                        onOpenSource={(source, opener) => {
+                          const alreadyOpen =
+                            openSource?.messageId === message.id && openSource.source.chunk_id === source.chunk_id;
+                          sourceOpenerRef.current = opener;
+                          setOpenSource(alreadyOpen ? null : { source, messageId: message.id });
+                        }}
+                      />
+                    )}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        </div>
+
+        <div className="mx-auto w-full max-w-[46rem] px-4 pb-4 sm:px-6">
+          <Composer disabled={busy || historyState !== "ready"} onSend={send} />
+          <p className="mt-2 text-center text-xs text-ink-soft">
+            Answers come from NordTech policy documents. Check the sources before acting on anything
+            important.
+          </p>
         </div>
       </div>
-
-      <div className="mx-auto w-full max-w-[46rem] px-4 pb-4 sm:px-6">
-        <Composer disabled={busy || historyState !== "ready"} onSend={send} />
-        <p className="mt-2 text-center text-xs text-ink-soft">
-          Answers come from NordTech policy documents. Check the sources before acting on anything
-          important.
-        </p>
-      </div>
+      {openSource && (
+        <SourcePanel key={openSource.source.chunk_id} source={openSource.source} onClose={closeSource} />
+      )}
     </div>
   );
 }

@@ -8,6 +8,17 @@ export type Source = {
   score: number;
 };
 
+// A source opened in place: its whole document and the span the answer drew on.
+export type SourcePassage = {
+  chunk_id: string;
+  source_doc: string | null;
+  source_file: string | null;
+  section_path: string | null;
+  content: string;
+  highlight_start: number | null;
+  highlight_end: number | null;
+};
+
 export type EmployeeContext = {
   employee_country?: string;
   office_country?: string;
