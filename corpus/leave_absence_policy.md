@@ -10,7 +10,7 @@
 
 ## 1. All Countries — Common Rules
 
-The following rules apply to every NordTech employee regardless of office or country of employment. Country-specific entitlements and sick pay rules are covered in Sections 2–4 below.
+The following rules apply to every NordTech employee regardless of office or country of employment. Country-specific entitlements and sick pay rules are covered in Sections 2–4 below, and other leave types (bereavement, unpaid leave, moving day) in Section 5.
 
 1. All leave requests must be submitted and approved through **Personio** (our HR system). Do not request leave verbally or over Slack — it must be logged in Personio to count as approved.
 2. Any leave request of **more than 5 consecutive days** must be submitted to your manager for approval **at least 2 weeks in advance**, except in cases of emergency.
@@ -134,10 +134,39 @@ NordTech observes the following Portuguese public holidays:
 
 ---
 
-## 5. How to Request Leave — Quick Reference
+## 5. Other Leave Types — All Countries
+
+**Section: Bereavement Leave**
+
+- NordTech provides at least **3 paid days** of bereavement leave on the death of an immediate family member (partner, child, parent, or sibling), and **1 paid day** for an extended family member (grandparent, grandchild, or parent-in-law).
+- Where local law grants more bereavement leave than this (for example, in Portugal), the statutory entitlement applies instead.
+- Request it in Personio as "Special" leave and let your manager know as soon as you can. No advance notice is required.
+
+**Section: Unpaid Leave**
+
+- Employees can take up to **30 calendar days of unpaid leave per calendar year**, with approval from both their manager and HR.
+- Request unpaid leave in Personio at least **4 weeks in advance** where possible. Unpaid leave recorded after the 5th of the month is deducted in the following month's payroll (see the Working Hours & Payroll Policy).
+- Cigna health insurance continues during unpaid leave. Annual leave accrual and pension contributions may pause, depending on local law.
+- Unpaid leave longer than 30 days, such as a sabbatical, is assessed case by case by HR.
+
+**Section: Moving Day**
+
+- Employees get **1 paid moving day per calendar year** when moving home. Request it in Personio as "Special" leave.
+
+**Section: Medical Appointments**
+
+- Short medical or dental appointments (up to 2 hours) during working hours do not need to be booked as leave — just let your manager know. Longer absences for medical reasons are recorded as sick leave.
+
+**Section: Leave During Probation**
+
+- Annual leave accrues from your first day of employment and can be taken during probation, subject to manager approval like any other leave request.
+
+---
+
+## 6. How to Request Leave — Quick Reference
 
 1. Log in to Personio.
-2. Select "Request Time Off" and choose the correct leave type (Annual, Sick, Parental, Unpaid).
+2. Select "Request Time Off" and choose the correct leave type (Annual, Sick, Parental, Unpaid, Special).
 3. For annual leave over 5 days, submit at least 2 weeks in advance.
 4. For sick leave, log the absence in Personio as soon as possible and notify your manager directly via Slack or a phone call on the first day of absence.
 5. Your manager receives an automatic approval request in Personio; approved leave appears on the team's shared calendar automatically.

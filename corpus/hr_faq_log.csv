@@ -49,8 +49,29 @@ question,ground_truth_answer,source_doc,category,country
 "How long is recruitment data kept for candidates who are not hired?","6 months after the recruitment process closes.",gdpr_employee_policy,GDPR,All
 "Within how many hours must a suspected data breach be reported to IT?","Within 2 hours of discovery, via the #it-support Slack channel or it-support@nordtech.ee.",gdpr_employee_policy,GDPR,All
 "Which third-party processor handles NordTech's employee health insurance data?","Cigna.",gdpr_employee_policy,GDPR,All
-"Can I expense a standing desk for my home office?","Not documented in any policy. This should be escalated to HR rather than assumed as covered.",NONE,Escalation,All
+"Can I expense a standing desk for my home office?","Not through the expense policy. Fully remote employees can buy one from the one-time €500 home office setup budget after 6 months of employment; hybrid employees are not eligible.",benefits_guide,Benefits,All
+"What are NordTech's core working hours?","10:00–15:00 in your local office time zone, Monday to Friday.",working_hours_policy,HR,All
+"On which day of the month is salary paid?","The 15th of each month, or the previous working day if the 15th falls on a weekend or public holiday.",working_hours_policy,HR,All
+"Where can I find my payslip?","In Personio under Documents > Payslips, published on payday. Payslips are not emailed.",working_hours_policy,HR,All
+"I started on the 20th of the month. When will I receive my first salary?","Starts after the 5th miss that month's payroll cutoff, so the first partial month is paid together with the following month's salary on the 15th.",working_hours_policy,HR,All
+"Do I need approval before working overtime?","Yes. Overtime must be agreed with your manager in advance and logged in Personio.",working_hours_policy,HR,All
+"How long is the probation period for an employee in Estonia?","Up to 4 months, as set in the employment contract. Either party can end the contract with 15 calendar days' notice during probation.",working_hours_policy,HR,Estonia
+"How much notice must I give if I resign in Finland?","14 days if employed for 5 years or less, 1 month if employed for more than 5 years, unless the contract says otherwise.",working_hours_policy,HR,Finland
+"How much notice must I give if I resign in Portugal?","30 days with less than 2 years of service, 60 days with 2 or more years of service.",working_hours_policy,HR,Portugal
+"How many days of bereavement leave do I get?","At least 3 paid days for immediate family and 1 paid day for extended family, or more where local law grants it.",leave_policy,Leave,All
+"Can I take unpaid leave, and how much?","Up to 30 calendar days per calendar year with manager and HR approval, requested in Personio at least 4 weeks in advance where possible.",leave_policy,Leave,All
+"Do I get a day off when I move house?","Yes, 1 paid moving day per calendar year, requested as Special leave in Personio.",leave_policy,Leave,All
+"Can I take annual leave during my probation period?","Yes. Annual leave accrues from your first day and can be taken during probation, subject to manager approval.",leave_policy,Leave,All
+"Can I buy a monitor with the home office setup budget?","No. Monitors and other tech peripherals go through IT's €300 peripherals budget; the €500 home office budget covers furniture and ergonomic items.",benefits_guide,Benefits,All
+"How do I get into the office on my first day?","Collect your key card from the Operations team at reception on Day 1. Offices are open 08:00–19:00 on working days.",onboarding_checklist,HR,All
 "What is the salary review process and when do raises happen?","Not documented in any policy. This should be escalated to your manager or HR directly.",NONE,Escalation,All
 "Can I work from a different country for a month?","Not fully addressed in any policy. This should be escalated to HR before making plans, per the Remote Work Policy's note on extended cross-border work.",NONE,Escalation,All
 "What happens to my stock options if I'm made redundant?","Not covered in any policy document; treatment of unvested stock options is handled case-by-case by HR and Finance.",NONE,Escalation,All
 "Is there a budget for team social events?","Not documented in any policy. This should be escalated to HR or your manager.",NONE,Escalation,All
+"Can I bring my dog to the office?","Not documented in any policy. This should be escalated to HR or the Operations team.",NONE,Escalation,All
+"Does NordTech pay a Christmas or year-end bonus?","Not documented in any policy. This should be escalated to your manager or HR.",NONE,Escalation,All
+"Is there a referral bonus for recommending candidates?","Not documented in any policy. This should be escalated to HR.",NONE,Escalation,All
+"Can I get a company phone?","Not documented in any policy. This should be escalated to IT or your manager.",NONE,Escalation,All
+"Is there parking at the Porto office?","Not documented in any policy. This should be escalated to the Operations team or HR.",NONE,Escalation,All
+"Can NordTech sponsor my work visa?","Not documented in any policy. This should be escalated to HR.",NONE,Escalation,All
+"What's a good place for lunch near the Tallinn office?","Out of scope for the HR knowledge base. The assistant should not answer from general knowledge.",NONE,Escalation,All

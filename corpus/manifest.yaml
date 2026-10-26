@@ -51,3 +51,9 @@ eu_ai_act_compliance_summary.md:
   doc_type: summary
   category: Legal
   country: All
+
+working_hours_payroll_policy.md:
+  source_doc: working_hours_policy
+  doc_type: policy
+  category: HR
+  country: All
