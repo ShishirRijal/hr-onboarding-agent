@@ -5,17 +5,23 @@ import os
 import threading
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Iterator
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
-from .schemas import ChatRequest, ChatResponse, SessionMessage
+from agent.escalation import HR_REQUEST_DECLINED_MESSAGE, HR_REQUEST_SENT_MESSAGE
+from interactions import HR_OFFERED
+
+from .schemas import ChatRequest, ChatResponse, HRRequest, HRRequestResponse, SessionMessage
+from .streaming import sse, stream_agent
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_WEB_ORIGINS = "http://localhost:3000"
+UNAVAILABLE_MESSAGE = "The assistant is temporarily unavailable."
 
 
 def create_app(*, graph: Any | None = None, store: Any | None = None) -> FastAPI:
@@ -44,35 +50,50 @@ def create_app(*, graph: Any | None = None, store: Any | None = None) -> FastAPI
 
     @app.post("/chat", response_model=ChatResponse)
     def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
-        session_id = request.session_id or str(uuid.uuid4())
-        employee_context = (
-            request.employee_context.model_dump(exclude_none=True) if request.employee_context else {}
-        )
-        state = {
-            "session_id": session_id,
-            "question": request.message,
-            "employee_context": employee_context,
-            "retrieval_config": {"apply_reranker": _env_flag("USE_COHERE_RERANK")},
-        }
-
+        session_id, state = _initial_state(request)
         try:
             with http_request.app.state.graph_lock:
                 result = http_request.app.state.graph.invoke(state)
         except Exception as exc:
             logger.exception("Agent failed to answer.")
-            raise HTTPException(status_code=503, detail="The assistant is temporarily unavailable.") from exc
+            raise HTTPException(status_code=503, detail=UNAVAILABLE_MESSAGE) from exc
+        return _chat_response(session_id, result)
 
-        response = result.get("final_response", {})
-        escalation = result.get("escalation")
-        return ChatResponse(
-            session_id=session_id,
-            interaction_id=result.get("interaction_id"),
-            answer=response.get("text", ""),
-            sources=response.get("sources", []),
-            confidence_score=result.get("confidence_score", 0.0),
-            confidence_label=result.get("confidence_label", "low"),
-            escalated=response.get("escalated", False),
-            escalation_reason=escalation.get("reason") if escalation else None,
+    @app.post("/chat/stream")
+    def chat_stream(request: ChatRequest, http_request: Request) -> StreamingResponse:
+        session_id, state = _initial_state(request)
+        app_state = http_request.app.state
+
+        def events() -> Iterator[str]:
+            yield sse("session", {"session_id": session_id})
+            try:
+                with app_state.graph_lock:
+                    for event, payload in stream_agent(app_state.graph, state):
+                        if event == "done":
+                            payload = _chat_response(session_id, payload).model_dump()
+                        yield sse(event, payload)
+            except Exception:
+                logger.exception("Agent failed to answer.")
+                yield sse("error", {"detail": UNAVAILABLE_MESSAGE})
+
+        return StreamingResponse(
+            events(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    @app.post("/interactions/{interaction_id}/hr-request", response_model=HRRequestResponse)
+    def hr_request(interaction_id: str, request: HRRequest, http_request: Request) -> HRRequestResponse:
+        try:
+            interaction = http_request.app.state.store.record_hr_choice(interaction_id, ask_hr=request.ask_hr)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail="This question was already answered.") from exc
+        if interaction is None:
+            raise HTTPException(status_code=404, detail="Question not found.")
+        return HRRequestResponse(
+            interaction_id=interaction.id,
+            escalation_status=interaction.escalation_status,
+            message=HR_REQUEST_SENT_MESSAGE if request.ask_hr else HR_REQUEST_DECLINED_MESSAGE,
         )
 
     @app.get("/sessions/{session_id}/messages", response_model=list[SessionMessage])
@@ -86,13 +107,42 @@ def create_app(*, graph: Any | None = None, store: Any | None = None) -> FastAPI
                 sources=interaction.sources,
                 confidence_score=interaction.confidence_score,
                 confidence_label=interaction.confidence_label,
-                escalated=interaction.escalated,
+                answered=bool(interaction.answered),
+                escalation_status=interaction.escalation_status,
                 escalation_reason=interaction.escalation_reason,
             )
             for interaction in http_request.app.state.store.list_session(session_id)
         ]
 
     return app
+
+
+def _initial_state(request: ChatRequest) -> tuple[str, dict[str, Any]]:
+    session_id = request.session_id or str(uuid.uuid4())
+    employee_context = request.employee_context.model_dump(exclude_none=True) if request.employee_context else {}
+    return session_id, {
+        "session_id": session_id,
+        "question": request.message,
+        "employee_context": employee_context,
+        "retrieval_config": {"apply_reranker": _env_flag("USE_COHERE_RERANK")},
+    }
+
+
+def _chat_response(session_id: str, result: dict[str, Any]) -> ChatResponse:
+    response = result.get("final_response", {})
+    handoff = result.get("hr_handoff")
+    answered = bool(response.get("answered", False))
+    return ChatResponse(
+        session_id=session_id,
+        interaction_id=result.get("interaction_id"),
+        answer=response.get("text", ""),
+        sources=response.get("sources", []),
+        confidence_score=result.get("confidence_score", 0.0),
+        confidence_label=result.get("confidence_label", "low"),
+        answered=answered,
+        escalation_status=None if answered else HR_OFFERED,
+        escalation_reason=handoff.get("reason") if handoff else None,
+    )
 
 
 def _build_agent() -> tuple[Any, Any]:
