@@ -1,0 +1,106 @@
+# Multi-turn conversations for the answer evaluation, alongside the single questions in
+# corpus/hr_faq_log.csv. Each turn says what the assistant should do:
+#   expect: answer     answer from the documents (graded against `answer`, cited from `sources`)
+#           not_found  say the documents don't cover it and offer to ask HR
+#           chat       reply conversationally, without searching or offering HR
+# Optional per turn: `country` the search should be filtered to, and `mentions`, words the
+# reply must contain. Facts here come from the documents in corpus/.
+
+- id: small-talk-and-memory
+  office: tallinn
+  turns:
+    - message: hi
+      expect: chat
+    - message: I'm Maria, I just joined the Tallinn office
+      expect: chat
+    - message: what's my name?
+      expect: chat
+      mentions: [Maria]
+    - message: thanks!
+      expect: chat
+
+- id: vacation-everyday-words-and-follow-ups
+  office: tallinn
+  turns:
+    - message: how many vacation days do I get?
+      expect: answer
+      answer: Employees based in Estonia get 28 calendar days of annual leave per year.
+      sources: [leave_policy]
+      country: Estonia
+    - message: and in Finland?
+      expect: answer
+      answer: Employees based in Finland get 25 working days of annual leave per year, counted in working days rather than calendar days.
+      sources: [leave_policy]
+      country: Finland
+    - message: can I carry unused days over to next year?
+      expect: answer
+      answer: Up to 5 unused days can be carried over into the next calendar year; anything beyond that is forfeited on 31 December unless local law requires otherwise.
+      sources: [leave_policy]
+
+- id: payday-and-first-salary
+  office: porto
+  turns:
+    - message: when is payday?
+      expect: answer
+      answer: Salaries are paid monthly on the 15th; if the 15th is a weekend or public holiday, on the previous working day.
+      sources: [working_hours_policy]
+    - message: what if I start on the 10th of the month?
+      expect: answer
+      answer: Starting after the 5th means the first partial month is paid together with the following month's salary.
+      sources: [working_hours_policy]
+
+- id: another-countrys-rules
+  office: porto
+  turns:
+    - message: How long is the probation period in Estonia?
+      expect: answer
+      answer: The probation period in Estonia is up to 4 months.
+      sources: [working_hours_policy]
+      country: Estonia
+
+- id: sick-pay-in-own-country
+  office: tampere
+  turns:
+    - message: if I'm off sick, do I still get paid?
+      expect: answer
+      answer: In Finland NordTech pays sick leave from day 2 at 100% of salary for 9 calendar days; from day 10 Kela takes over with the statutory sickness allowance.
+      sources: [leave_policy]
+      country: Finland
+
+- id: greeting-with-a-question
+  office: tallinn
+  turns:
+    - message: hey! who is the CTO?
+      expect: answer
+      answer: Kaspar Tamm is the Chief Technology Officer, based in the Tallinn office.
+      sources: [org_chart]
+
+- id: remote-benefits
+  office: remote
+  turns:
+    - message: do I get a gym allowance?
+      expect: answer
+      answer: All employees get a €50 per month gym and wellness budget, claimed through Expensify and reimbursed monthly.
+      sources: [benefits_guide]
+    - message: can I buy a monitor with my home office budget?
+      expect: answer
+      answer: No. The €500 home office budget is for furniture for fully remote employees; monitors and other peripherals go through IT's €300 peripherals budget.
+      sources: [benefits_guide, it_guide]
+
+- id: not-in-the-documents
+  office: tallinn
+  turns:
+    - message: can I bring my dog to the office?
+      expect: not_found
+    - message: what happens to my stock options if I'm made redundant?
+      expect: not_found
+    - message: ok thanks anyway
+      expect: chat
+
+- id: off-topic
+  office: tampere
+  turns:
+    - message: can you write me a poem about Tallinn?
+      expect: chat
+    - message: what's the capital of France?
+      expect: chat
