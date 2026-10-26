@@ -9,5 +9,15 @@ services:
       - qdrant_storage:/qdrant/storage
     restart: unless-stopped
 
+  # Catches outgoing email locally so the HR digest can be checked without sending real
+  # mail: SMTP on 1025, inbox at http://localhost:8025.
+  mailpit:
+    image: axllent/mailpit:v1.31.5
+    container_name: hr-onboarding-mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    restart: unless-stopped
+
 volumes:
   qdrant_storage:

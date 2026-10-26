@@ -13,8 +13,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from agent.escalation import HR_REQUEST_DECLINED_MESSAGE, HR_REQUEST_SENT_MESSAGE
+from agent.escalation import HR_REQUEST_DECLINED_MESSAGE, hr_request_sent_message
 from interactions import HR_OFFERED
+from interactions.digest import DigestSettings, schedule_daily_digest
 
 from .schemas import ChatRequest, ChatResponse, HRRequest, HRRequestResponse, SessionMessage, SourcePassage
 from .streaming import sse, stream_agent
@@ -23,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_WEB_ORIGINS = "http://localhost:3000"
 DEFAULT_CORPUS_DIR = "corpus"
+# Who is asking, until there is sign-in: then this comes from the signed-in account.
+PLACEHOLDER_EMPLOYEE = {"name": "Employee", "email": "employee@nordtech.test"}
 UNAVAILABLE_MESSAGE = "The assistant is temporarily unavailable."
 SOURCE_GONE_MESSAGE = (
     "This source is no longer in the HR documents. Ask the question again to get current sources."
@@ -32,14 +35,19 @@ SOURCE_GONE_MESSAGE = (
 def create_app(*, graph: Any | None = None, store: Any | None = None, passages: Any | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        digest_scheduler = None
         if graph is None or store is None or passages is None:
             app.state.graph, app.state.store, app.state.passages = _build_agent()
+            # Questions employees sent to HR go out in one email at the end of the day.
+            digest_scheduler = schedule_daily_digest(app.state.store, DigestSettings.from_env())
         else:
             app.state.graph, app.state.store, app.state.passages = graph, store, passages
         # The embedding model is not safe to call from several threads at once,
         # so requests run the graph one at a time.
         app.state.graph_lock = threading.Lock()
         yield
+        if digest_scheduler is not None:
+            digest_scheduler.shutdown(wait=False)
 
     app = FastAPI(title="NordTech HR Onboarding Agent", lifespan=lifespan)
     app.add_middleware(
@@ -91,7 +99,10 @@ def create_app(*, graph: Any | None = None, store: Any | None = None, passages: 
     @app.post("/interactions/{interaction_id}/hr-request", response_model=HRRequestResponse)
     def hr_request(interaction_id: str, request: HRRequest, http_request: Request) -> HRRequestResponse:
         try:
-            interaction = http_request.app.state.store.record_hr_choice(interaction_id, ask_hr=request.ask_hr)
+            employee = _current_employee(http_request)
+            interaction = http_request.app.state.store.record_hr_choice(
+                interaction_id, ask_hr=request.ask_hr, name=employee["name"], email=employee["email"]
+            )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail="This question was already answered.") from exc
         if interaction is None:
@@ -99,7 +110,9 @@ def create_app(*, graph: Any | None = None, store: Any | None = None, passages: 
         return HRRequestResponse(
             interaction_id=interaction.id,
             escalation_status=interaction.escalation_status,
-            message=HR_REQUEST_SENT_MESSAGE if request.ask_hr else HR_REQUEST_DECLINED_MESSAGE,
+            message=(
+                hr_request_sent_message(employee["email"]) if request.ask_hr else HR_REQUEST_DECLINED_MESSAGE
+            ),
         )
 
     @app.get("/sessions/{session_id}/messages", response_model=list[SessionMessage])
@@ -136,6 +149,12 @@ def create_app(*, graph: Any | None = None, store: Any | None = None, passages: 
         )
 
     return app
+
+
+def _current_employee(request: Request) -> dict[str, str]:
+    """The employee making the request. A placeholder until sign-in exists."""
+    del request
+    return PLACEHOLDER_EMPLOYEE
 
 
 def _initial_state(request: ChatRequest, store: Any) -> tuple[str, dict[str, Any]]:

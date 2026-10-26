@@ -170,7 +170,7 @@ function NotFound({
             Sent to HR
           </p>
           <p className="mt-0.5 text-sm text-ink">
-            {message.hrMessage ?? "Your question was sent to the HR team."}
+            {message.hrMessage ?? "Your question goes to the HR team in their end-of-day summary."}
           </p>
         </div>
       )}

@@ -35,6 +35,12 @@ class Interaction(Base):
     escalation_status: Mapped[str | None] = mapped_column(String(16), index=True)
     escalated: Mapped[bool] = mapped_column(Boolean, index=True)
     escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Who to reply to: only stored when the employee asks for the question to go to HR,
+    # so declined and dismissed questions stay anonymous.
+    employee_name: Mapped[str | None] = mapped_column(String(120))
+    employee_email: Mapped[str | None] = mapped_column(String(254))
+    # When the question went out in an HR digest email; None until then.
+    hr_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     escalation_reason: Mapped[str | None] = mapped_column(String(64))
     confidence_score: Mapped[float] = mapped_column(Float)
     confidence_label: Mapped[str] = mapped_column(String(16))
@@ -96,7 +102,14 @@ class InteractionStore:
         with self._sessions() as session:
             return session.get(Interaction, interaction_id)
 
-    def record_hr_choice(self, interaction_id: str, *, ask_hr: bool) -> Interaction | None:
+    def record_hr_choice(
+        self,
+        interaction_id: str,
+        *,
+        ask_hr: bool,
+        name: str | None = None,
+        email: str | None = None,
+    ) -> Interaction | None:
         with self._sessions.begin() as session:
             interaction = session.get(Interaction, interaction_id)
             if interaction is None:
@@ -106,6 +119,8 @@ class InteractionStore:
             interaction.escalation_status = HR_REQUESTED if ask_hr else HR_DECLINED
             interaction.escalated = ask_hr
             interaction.escalated_at = datetime.now(timezone.utc) if ask_hr else None
+            interaction.employee_name = name if ask_hr else None
+            interaction.employee_email = email if ask_hr else None
             return interaction
 
     def list_session(self, session_id: str) -> list[Interaction]:
@@ -116,6 +131,27 @@ class InteractionStore:
                 .order_by(Interaction.created_at)
             )
             return list(session.scalars(query))
+
+    def pending_hr_requests(self) -> list[Interaction]:
+        """Questions the employee sent to HR that haven't gone out in a digest yet."""
+        with self._sessions() as session:
+            query = (
+                select(Interaction)
+                .where(Interaction.escalated.is_(True))
+                .where(Interaction.hr_notified_at.is_(None))
+                .order_by(Interaction.escalated_at)
+            )
+            return list(session.scalars(query))
+
+    def mark_hr_notified(self, interaction_ids: list[str], *, at: datetime | None = None) -> None:
+        if not interaction_ids:
+            return
+        with self._sessions.begin() as session:
+            session.execute(
+                update(Interaction)
+                .where(Interaction.id.in_(interaction_ids))
+                .values(hr_notified_at=at or datetime.now(timezone.utc))
+            )
 
     def list_escalations(self, *, since: datetime | None = None) -> list[Interaction]:
         with self._sessions() as session:

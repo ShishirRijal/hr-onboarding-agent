@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from .state import AnswerSource, ConfidenceDebug, HRHandoff, RetrievalState
 
-HR_CONTACT_EMAIL = "hr@nordtech.ee"
+HR_CONTACT_EMAIL = "hr@nordtech.test"
 NOT_FOUND_MESSAGE = (
     "I couldn't find an answer to this in NordTech's HR documents. "
     "Do you want me to ask the HR team about it?"
 )
-HR_REQUEST_SENT_MESSAGE = (
-    f"I've sent your question to the HR team. You can also reach them directly at {HR_CONTACT_EMAIL}."
-)
+def hr_request_sent_message(email: str) -> str:
+    return (
+        "Your question goes to the HR team in their end-of-day summary, "
+        f"and they'll reply to {email}. If it's urgent, email {HR_CONTACT_EMAIL}."
+    )
 HR_REQUEST_DECLINED_MESSAGE = "Okay, I won't send it to HR."
 
 
