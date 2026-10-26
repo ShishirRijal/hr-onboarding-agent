@@ -74,6 +74,7 @@ class InteractionStore:
             sources=list(response.get("sources", []) or []),
             hr_handoff=dict(handoff) if handoff else None,
             debug={
+                "message_route": state.get("message_route", {}),
                 "retrieval": state.get("retrieval_debug", {}),
                 "confidence": state.get("confidence_debug", {}),
             },

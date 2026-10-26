@@ -93,9 +93,14 @@ class FakeStateGraph:
         return FakeCompiledGraph(self.nodes, self.edges, self.conditional_edges)
 
 
-def fake_answer_generator(question, chunks):
+def fake_answer_generator(question, chunks, **_):
     del question
     return str(chunks[0]["text"])
+
+
+def route_to_hr(question, history):
+    del history
+    return {"kind": "hr", "search_query": question}
 
 
 def test_retrieval_graph_resolves_country_from_employee_context() -> None:
@@ -110,6 +115,7 @@ def test_retrieval_graph_resolves_country_from_employee_context() -> None:
         engine,
         retriever=retriever,
         answer_generator=fake_answer_generator,
+        message_router=route_to_hr,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -151,6 +157,7 @@ def test_retrieval_graph_prefers_explicit_override() -> None:
         engine,
         retriever=retriever,
         answer_generator=fake_answer_generator,
+        message_router=route_to_hr,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -184,6 +191,7 @@ def test_retrieval_graph_ignores_remote_office_country_for_filtering() -> None:
         engine,
         retriever=retriever,
         answer_generator=fake_answer_generator,
+        message_router=route_to_hr,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -205,8 +213,8 @@ def test_retrieval_graph_uses_injected_answer_generator() -> None:
     retriever = FakeRetriever()
     answer_generator_calls: list[dict[str, object]] = []
 
-    def answer_generator(question, chunks):
-        answer_generator_calls.append({"question": question, "chunks": chunks})
+    def answer_generator(question, chunks, **context):
+        answer_generator_calls.append({"question": question, "chunks": chunks, **context})
         return "Employees in Estonia receive 28 calendar days of annual leave."
 
     engine = RetrievalEngine(
@@ -219,6 +227,7 @@ def test_retrieval_graph_uses_injected_answer_generator() -> None:
         engine,
         retriever=retriever,
         answer_generator=answer_generator,
+        message_router=route_to_hr,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -257,6 +266,7 @@ def test_retrieval_graph_returns_low_confidence_without_chunks() -> None:
     graph = build_retrieval_graph(
         engine,
         retriever=retriever,
+        message_router=route_to_hr,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -360,6 +370,7 @@ def test_retrieval_graph_deduplicates_answer_sources_by_location() -> None:
         engine,
         retriever=retriever,
         answer_generator=fake_answer_generator,
+        message_router=route_to_hr,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -423,6 +434,7 @@ def test_retrieval_graph_caps_confidence_below_perfect_score() -> None:
         engine,
         retriever=retriever,
         answer_generator=fake_answer_generator,
+        message_router=route_to_hr,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -446,6 +458,7 @@ def test_retrieval_graph_responds_to_user_on_high_confidence() -> None:
         engine,
         retriever=retriever,
         answer_generator=fake_answer_generator,
+        message_router=route_to_hr,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -486,6 +499,7 @@ def test_retrieval_graph_responds_to_user_on_medium_confidence() -> None:
         engine,
         retriever=retriever,
         answer_generator=fake_answer_generator,
+        message_router=route_to_hr,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -524,6 +538,7 @@ def test_low_confidence_offers_hr_without_generating_an_answer() -> None:
         engine,
         retriever=retriever,
         answer_generator=fake_answer_generator,
+        message_router=route_to_hr,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -575,6 +590,7 @@ def test_no_documents_found_offers_hr() -> None:
     graph = build_retrieval_graph(
         engine,
         retriever=retriever,
+        message_router=route_to_hr,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -600,7 +616,7 @@ def _fused_chunk(dense_score: float) -> RetrievedChunk:
     )
 
 
-def _build_graph(retriever, answer_generator=fake_answer_generator):
+def _build_graph(retriever, answer_generator=fake_answer_generator, message_router=route_to_hr):
     engine = RetrievalEngine(
         client=SimpleNamespace(),
         collection_name="nordtech_hr",
@@ -611,6 +627,7 @@ def _build_graph(retriever, answer_generator=fake_answer_generator):
         engine,
         retriever=retriever,
         answer_generator=answer_generator,
+        message_router=message_router,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -641,7 +658,7 @@ def test_unreranked_off_topic_retrieval_offers_hr() -> None:
 def test_declined_answer_offers_hr_even_with_strong_retrieval() -> None:
     graph = _build_graph(
         FakeRetriever(results=[_fused_chunk(0.8)]),
-        answer_generator=lambda question, chunks: "INSUFFICIENT_CONTEXT",
+        answer_generator=lambda question, chunks, **_: "INSUFFICIENT_CONTEXT",
     )
 
     result = graph.invoke({"question": "Can I bring my dog to the office?"})
@@ -673,6 +690,7 @@ def test_graph_logs_every_interaction_and_returns_its_id() -> None:
         retriever=FakeRetriever(),
         answer_generator=fake_answer_generator,
         interaction_logger=interaction_logger,
+        message_router=route_to_hr,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -684,3 +702,99 @@ def test_graph_logs_every_interaction_and_returns_its_id() -> None:
     assert result["interaction_id"] == "interaction-1"
     assert logged_states[0]["session_id"] == "session-1"
     assert logged_states[0]["final_response"]["answered"] is True
+
+
+def test_small_talk_is_answered_without_searching_or_offering_hr() -> None:
+    retriever = FakeRetriever()
+    logged: list[dict[str, object]] = []
+    chat_calls: list[dict[str, object]] = []
+
+    def chat_responder(question, **context):
+        chat_calls.append({"question": question, **context})
+        return "Hi Shishir! What can I help you with?"
+
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    graph = build_retrieval_graph(
+        engine,
+        retriever=retriever,
+        answer_generator=fake_answer_generator,
+        message_router=lambda question, history: {"kind": "chat", "search_query": ""},
+        chat_responder=chat_responder,
+        interaction_logger=lambda state: logged.append(state) or "interaction-1",
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+    history = [{"question": "hey", "answer": "Hello!"}]
+    result = graph.invoke({"question": "hi i'm shishir", "history": history, "employee_context": {}})
+
+    assert graph.visited == ["understand_message", "reply_in_chat", "log_interaction"]
+    assert retriever.calls == []
+    assert chat_calls[0]["history"] == history
+    assert result["final_response"] == {
+        "text": "Hi Shishir! What can I help you with?",
+        "sources": [],
+        "answered": True,
+    }
+    assert "hr_handoff" not in result
+    assert len(logged) == 1
+
+
+def test_follow_up_searches_with_the_rewritten_question_and_answers_with_history() -> None:
+    retriever = FakeRetriever()
+    answer_calls: list[dict[str, object]] = []
+
+    def answer_generator(question, chunks, **context):
+        answer_calls.append({"question": question, **context})
+        return "In Finland you get 25 working days."
+
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    graph = build_retrieval_graph(
+        engine,
+        retriever=retriever,
+        answer_generator=answer_generator,
+        message_router=lambda question, history: {
+            "kind": "hr",
+            "search_query": "How much annual leave do employees in Finland get?",
+        },
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+    history = [{"question": "How much leave do I get?", "answer": "28 calendar days."}]
+    graph.invoke(
+        {"question": "and in Finland?", "history": history, "employee_context": {"employee_country": "Estonia"}}
+    )
+
+    assert retriever.calls[0]["query"] == "How much annual leave do employees in Finland get?"
+    assert answer_calls[0]["question"] == "and in Finland?"
+    assert answer_calls[0]["history"] == history
+    assert answer_calls[0]["employee_context"] == {"employee_country": "Estonia"}
+
+
+def _filters_for(question, search_query=None):
+    graph = _build_graph(
+        FakeRetriever(),
+        message_router=lambda message, history: {"kind": "hr", "search_query": search_query or message},
+    )
+    result = graph.invoke({"question": question, "employee_context": {"employee_country": "Estonia"}})
+    return result["resolved_filters"].get("country")
+
+
+def test_country_named_in_the_question_overrides_the_employees_country() -> None:
+    assert _filters_for("How much annual leave do I get?") == "Estonia"
+    assert _filters_for("and there?", search_query="How much annual leave do employees in Finland get?") == "Finland"
+    assert _filters_for("Is there parking at the Porto office?") == "Portugal"
+    assert _filters_for("Compare sick pay in Estonia and Finland") is None

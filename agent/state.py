@@ -91,10 +91,25 @@ class FinalResponse(TypedDict):
     answered: bool
 
 
+class ConversationTurn(TypedDict):
+    question: str
+    answer: str
+
+
+class MessageRoute(TypedDict):
+    # "chat" for small talk answered directly, "hr" for questions answered from the documents.
+    kind: str
+    # The question rewritten to stand on its own, for searching; empty for small talk.
+    search_query: str
+
+
 class RetrievalState(TypedDict, total=False):
     session_id: str
     question: str
     employee_context: EmployeeContext
+    # Earlier turns of this chat, oldest first.
+    history: list[ConversationTurn]
+    message_route: MessageRoute
     retrieval_overrides: RetrievalOverrides
     retrieval_config: RetrievalConfig
     resolved_filters: dict[str, str]

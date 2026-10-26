@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import asdict
 from typing import Any, Callable
 
@@ -12,14 +13,18 @@ from retrieval import (
     RetrievedChunk,
     retrieve,
 )
+from retrieval.vocabulary import add_policy_terms
 
 from .answering import generate_grounded_answer, is_insufficient_answer
+from .conversation import MESSAGE_CHAT, generate_chat_reply, recent_history, route_message
 from .escalation import NOT_FOUND_MESSAGE, build_hr_handoff
 from .state import (
     AnswerSource,
+    ConversationTurn,
     EmployeeContext,
     FinalResponse,
     GeneratedAnswer,
+    MessageRoute,
     RetrievalConfig,
     RetrievalDebug,
     RetrievalOverrides,
@@ -30,6 +35,13 @@ DEFAULT_COUNTRY_KEYS = (
     "employee_country",
     "office_country",
 )
+# Words that tie a question to one country's rules, so "and in Finland?" searches
+# Finland's sections even for an employee in Tallinn.
+COUNTRY_MENTIONS = {
+    "Estonia": ("estonia", "estonian", "tallinn"),
+    "Finland": ("finland", "finnish", "tampere"),
+    "Portugal": ("portugal", "portuguese", "porto"),
+}
 MAX_ANSWER_SOURCES = 3
 NOT_FOUND_CONFIDENCE_LABELS = frozenset({"low"})
 HIGH_CONFIDENCE = 0.75
@@ -47,7 +59,9 @@ def build_retrieval_graph(
     engine: RetrievalEngine,
     *,
     retriever: Callable[..., list[RetrievedChunk]] = retrieve,
-    answer_generator: Callable[[str, list[dict[str, Any]]], str] | None = None,
+    answer_generator: Callable[..., str] | None = None,
+    message_router: Callable[[str, list[ConversationTurn]], MessageRoute] = route_message,
+    chat_responder: Callable[..., str] = generate_chat_reply,
     interaction_logger: Callable[[RetrievalState], str] | None = None,
     state_graph_cls: Any | None = None,
     start_token: Any | None = None,
@@ -64,6 +78,8 @@ def build_retrieval_graph(
         raise ValueError("start_token and end_token are required when overriding the graph class.")
 
     graph = state_graph_cls(RetrievalState)
+    graph.add_node("understand_message", _make_understand_message_node(message_router))
+    graph.add_node("reply_in_chat", _make_reply_in_chat_node(chat_responder))
     graph.add_node("resolve_filters", _resolve_filters_node)
     graph.add_node(
         "retrieve_documents",
@@ -80,7 +96,15 @@ def build_retrieval_graph(
     graph.add_node("respond_to_user", _respond_to_user_node)
     graph.add_node("answer_not_found", _answer_not_found_node)
     graph.add_node("log_interaction", _make_log_interaction_node(interaction_logger))
-    graph.add_edge(start_token, "resolve_filters")
+    graph.add_edge(start_token, "understand_message")
+    # Small talk is answered directly; only HR questions search the documents, so a
+    # greeting never ends in "not found, ask HR?".
+    graph.add_conditional_edges(
+        "understand_message",
+        _route_after_understanding,
+        {"reply_in_chat": "reply_in_chat", "resolve_filters": "resolve_filters"},
+    )
+    graph.add_edge("reply_in_chat", "log_interaction")
     graph.add_edge("resolve_filters", "retrieve_documents")
     graph.add_edge("retrieve_documents", "score_confidence")
     # Retrieval is scored before generating, so a weak search never produces (or streams)
@@ -101,16 +125,56 @@ def build_retrieval_graph(
     return graph.compile()
 
 
+def _make_understand_message_node(
+    message_router: Callable[[str, list[ConversationTurn]], MessageRoute],
+) -> Callable[[RetrievalState], dict[str, Any]]:
+    def _understand_message_node(state: RetrievalState) -> dict[str, Any]:
+        question = _clean_required_value(state.get("question"), field_name="question")
+        history = recent_history(state.get("history", []))
+        return {"history": history, "message_route": message_router(question, history)}
+
+    return _understand_message_node
+
+
+def _route_after_understanding(state: RetrievalState) -> str:
+    route = state.get("message_route") or {}
+    return "reply_in_chat" if route.get("kind") == MESSAGE_CHAT else "resolve_filters"
+
+
+def _make_reply_in_chat_node(chat_responder: Callable[..., str]) -> Callable[[RetrievalState], dict[str, Any]]:
+    def _reply_in_chat_node(state: RetrievalState) -> dict[str, Any]:
+        text = chat_responder(
+            _clean_required_value(state.get("question"), field_name="question"),
+            history=state.get("history", []),
+            employee_context=state.get("employee_context", {}),
+        )
+        response: FinalResponse = {"text": text, "sources": [], "answered": True}
+        return {"final_response": response}
+
+    return _reply_in_chat_node
+
+
 def _resolve_filters_node(state: RetrievalState) -> dict[str, Any]:
     employee_context = state.get("employee_context", {})
     overrides = state.get("retrieval_overrides", {})
+
+    route = state.get("message_route") or {}
+    mentioned = _countries_mentioned(route.get("search_query") or state.get("question") or "")
+    # A country named in the question wins over the employee's own; naming several
+    # (comparing countries) searches them all.
+    if len(mentioned) == 1:
+        country = mentioned[0]
+    elif mentioned:
+        country = None
+    else:
+        country = _resolve_country(employee_context)
 
     filters = RetrievalFilters(
         source_doc=_clean_optional_value(overrides.get("source_doc")),
         source_file=_clean_optional_value(overrides.get("source_file")),
         doc_type=_clean_optional_value(overrides.get("doc_type")),
         category=_clean_optional_value(overrides.get("category")),
-        country=_clean_optional_value(overrides.get("country")) or _resolve_country(employee_context),
+        country=_clean_optional_value(overrides.get("country")) or country,
         file_type=_clean_optional_value(overrides.get("file_type")),
     )
 
@@ -123,13 +187,15 @@ def _make_retrieve_node(
     retriever: Callable[..., list[RetrievedChunk]] = retrieve,
 ) -> Callable[[RetrievalState], dict[str, Any]]:
     def _retrieve_node(state: RetrievalState) -> dict[str, Any]:
-        question = _clean_required_value(state.get("question"), field_name="question")
+        # Follow-ups are searched as the standalone question the router rewrote them into.
+        route = state.get("message_route") or {}
+        question = route.get("search_query") or _clean_required_value(state.get("question"), field_name="question")
         config = _normalize_retrieval_config(state.get("retrieval_config", {}))
         filters = RetrievalFilters(**state.get("resolved_filters", {}))
 
         results = retriever(
             engine,
-            question,
+            add_policy_terms(question),
             filters=filters if not filters.is_empty() else None,
             top_n=config["top_n"],
             dense_top_k=config["dense_top_k"],
@@ -156,13 +222,18 @@ def _make_retrieve_node(
 
 def _make_generate_answer_node(
     *,
-    answer_generator: Callable[[str, list[dict[str, Any]]], str],
+    answer_generator: Callable[..., str],
 ) -> Callable[[RetrievalState], dict[str, Any]]:
     def _generate_answer_node(state: RetrievalState) -> dict[str, Any]:
         question = _clean_required_value(state.get("question"), field_name="question")
         chunks = state.get("retrieved_chunks", [])
 
-        text = answer_generator(question, chunks).strip()
+        text = answer_generator(
+            question,
+            chunks,
+            history=state.get("history", []),
+            employee_context=state.get("employee_context", {}),
+        ).strip()
         answer: GeneratedAnswer = {"text": text, "sources": _build_answer_sources(chunks)}
         if text and not is_insufficient_answer(text):
             return {"generated_answer": answer, "answer_declined": False}
@@ -346,6 +417,15 @@ def _normalize_retrieval_config(raw_config: RetrievalConfig) -> dict[str, Any]:
         "bm25_top_k": int(raw_config.get("bm25_top_k", DEFAULT_BM25_TOP_K)),
         "apply_reranker": bool(raw_config.get("apply_reranker", True)),
     }
+
+
+def _countries_mentioned(text: str) -> list[str]:
+    lowered = text.lower()
+    return [
+        country
+        for country, words in COUNTRY_MENTIONS.items()
+        if any(re.search(rf"\b{word}\b", lowered) for word in words)
+    ]
 
 
 def _resolve_country(employee_context: EmployeeContext) -> str | None:

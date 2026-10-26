@@ -55,7 +55,7 @@ def create_app(*, graph: Any | None = None, store: Any | None = None, passages: 
 
     @app.post("/chat", response_model=ChatResponse)
     def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
-        session_id, state = _initial_state(request)
+        session_id, state = _initial_state(request, http_request.app.state.store)
         try:
             with http_request.app.state.graph_lock:
                 result = http_request.app.state.graph.invoke(state)
@@ -66,8 +66,8 @@ def create_app(*, graph: Any | None = None, store: Any | None = None, passages: 
 
     @app.post("/chat/stream")
     def chat_stream(request: ChatRequest, http_request: Request) -> StreamingResponse:
-        session_id, state = _initial_state(request)
         app_state = http_request.app.state
+        session_id, state = _initial_state(request, app_state.store)
 
         def events() -> Iterator[str]:
             yield sse("session", {"session_id": session_id})
@@ -138,13 +138,20 @@ def create_app(*, graph: Any | None = None, store: Any | None = None, passages: 
     return app
 
 
-def _initial_state(request: ChatRequest) -> tuple[str, dict[str, Any]]:
+def _initial_state(request: ChatRequest, store: Any) -> tuple[str, dict[str, Any]]:
     session_id = request.session_id or str(uuid.uuid4())
     employee_context = request.employee_context.model_dump(exclude_none=True) if request.employee_context else {}
+    # Earlier turns let the agent follow the conversation: names, follow-ups, "what about…".
+    history = (
+        [{"question": item.question, "answer": item.answer} for item in store.list_session(session_id)]
+        if request.session_id
+        else []
+    )
     return session_id, {
         "session_id": session_id,
         "question": request.message,
         "employee_context": employee_context,
+        "history": history,
         "retrieval_config": {"apply_reranker": _env_flag("USE_COHERE_RERANK")},
     }
 
