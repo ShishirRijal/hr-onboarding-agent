@@ -4,8 +4,8 @@ from .state import ConfidenceDebug, HREscalation, RetrievalState
 
 HR_CONTACT_EMAIL = "hr@nordtech.ee"
 ESCALATION_MESSAGE = (
-    "I can't answer this reliably from the HR knowledge base, so I'm handing it over to the HR "
-    f"team. You can also contact them directly at {HR_CONTACT_EMAIL}."
+    "I can't answer this reliably from the HR knowledge base, so I've logged your question for "
+    f"the HR team. You can also contact them directly at {HR_CONTACT_EMAIL}."
 )
 
 

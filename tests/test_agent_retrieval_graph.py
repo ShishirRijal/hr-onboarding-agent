@@ -454,7 +454,7 @@ def test_retrieval_graph_responds_to_user_on_high_confidence() -> None:
 
     result = graph.invoke({"question": "How much annual leave do I get?"})
 
-    assert graph.visited[-1] == "respond_to_user"
+    assert "respond_to_user" in graph.visited
     assert "escalate_to_hr" not in graph.visited
     assert "escalation" not in result
     assert result["final_response"] == {
@@ -495,7 +495,7 @@ def test_retrieval_graph_responds_to_user_on_medium_confidence() -> None:
     result = graph.invoke({"question": "Can I work from abroad?"})
 
     assert result["confidence_label"] == "medium"
-    assert graph.visited[-1] == "respond_to_user"
+    assert "respond_to_user" in graph.visited
     assert result["final_response"]["escalated"] is False
 
 
@@ -538,7 +538,7 @@ def test_retrieval_graph_escalates_to_hr_on_low_confidence() -> None:
     )
 
     assert result["confidence_label"] == "low"
-    assert graph.visited[-1] == "escalate_to_hr"
+    assert "escalate_to_hr" in graph.visited
     assert "respond_to_user" not in graph.visited
     assert result["final_response"] == {
         "text": ESCALATION_MESSAGE,
@@ -575,7 +575,7 @@ def test_retrieval_graph_escalates_when_no_documents_found() -> None:
 
     result = graph.invoke({"question": "Can I bring my dog to the Porto office?"})
 
-    assert graph.visited[-1] == "escalate_to_hr"
+    assert "escalate_to_hr" in graph.visited
     assert result["escalation"]["reason"] == "no_documents_found"
     assert result["escalation"]["candidate_sources"] == []
     assert result["final_response"]["escalated"] is True
@@ -644,3 +644,34 @@ def test_declined_answer_escalates_even_with_strong_retrieval() -> None:
     assert result["escalation"]["reason"] == "answer_declined"
     assert result["escalation"]["candidate_sources"]
     assert result["final_response"]["text"] == ESCALATION_MESSAGE
+
+
+def test_graph_logs_every_interaction_and_returns_its_id() -> None:
+    logged_states: list[dict[str, object]] = []
+
+    def interaction_logger(state):
+        logged_states.append(dict(state))
+        return "interaction-1"
+
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    graph = build_retrieval_graph(
+        engine,
+        retriever=FakeRetriever(),
+        answer_generator=fake_answer_generator,
+        interaction_logger=interaction_logger,
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+    result = graph.invoke({"question": "How much annual leave do I get?", "session_id": "session-1"})
+
+    assert graph.visited[-1] == "log_interaction"
+    assert result["interaction_id"] == "interaction-1"
+    assert logged_states[0]["session_id"] == "session-1"
+    assert logged_states[0]["final_response"]["escalated"] is False

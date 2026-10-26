@@ -48,6 +48,7 @@ def build_retrieval_graph(
     *,
     retriever: Callable[..., list[RetrievedChunk]] = retrieve,
     answer_generator: Callable[[str, list[dict[str, Any]]], str] | None = None,
+    interaction_logger: Callable[[RetrievalState], str] | None = None,
     state_graph_cls: Any | None = None,
     start_token: Any | None = None,
     end_token: Any | None = None,
@@ -78,6 +79,7 @@ def build_retrieval_graph(
     graph.add_node("score_confidence", _score_confidence_node)
     graph.add_node("respond_to_user", _respond_to_user_node)
     graph.add_node("escalate_to_hr", _escalate_to_hr_node)
+    graph.add_node("log_interaction", _make_log_interaction_node(interaction_logger))
     graph.add_edge(start_token, "resolve_filters")
     graph.add_edge("resolve_filters", "retrieve_documents")
     graph.add_edge("retrieve_documents", "generate_answer")
@@ -87,8 +89,9 @@ def build_retrieval_graph(
         _route_after_confidence,
         {"respond_to_user": "respond_to_user", "escalate_to_hr": "escalate_to_hr"},
     )
-    graph.add_edge("respond_to_user", end_token)
-    graph.add_edge("escalate_to_hr", end_token)
+    graph.add_edge("respond_to_user", "log_interaction")
+    graph.add_edge("escalate_to_hr", "log_interaction")
+    graph.add_edge("log_interaction", end_token)
     return graph.compile()
 
 
@@ -313,6 +316,17 @@ def _dense_confidence(similarity: float) -> float:
         DENSE_SIMILARITY_CEILING - DENSE_SIMILARITY_FLOOR
     )
     return round(MEDIUM_CONFIDENCE + position * (MAX_UNRERANKED_CONFIDENCE - MEDIUM_CONFIDENCE), 3)
+
+
+def _make_log_interaction_node(
+    interaction_logger: Callable[[RetrievalState], str] | None,
+) -> Callable[[RetrievalState], dict[str, Any]]:
+    def _log_interaction_node(state: RetrievalState) -> dict[str, Any]:
+        if interaction_logger is None:
+            return {}
+        return {"interaction_id": interaction_logger(state)}
+
+    return _log_interaction_node
 
 
 def _confidence_label(score: float) -> str:
