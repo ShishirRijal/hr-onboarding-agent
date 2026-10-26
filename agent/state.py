@@ -69,13 +69,12 @@ class ConfidenceDebug(TypedDict, total=False):
     top_score: float
     top_dense_score: float
     score_basis: str
-    has_answer: bool
     has_sources: bool
     has_rerank_signal: bool
     answer_declined: bool
 
 
-class HREscalation(TypedDict):
+class HRHandoff(TypedDict):
     reason: str
     contact: str
     question: str
@@ -89,7 +88,7 @@ class HREscalation(TypedDict):
 class FinalResponse(TypedDict):
     text: str
     sources: list[AnswerSource]
-    escalated: bool
+    answered: bool
 
 
 class RetrievalState(TypedDict, total=False):
@@ -106,6 +105,6 @@ class RetrievalState(TypedDict, total=False):
     confidence_score: float
     confidence_label: str
     confidence_debug: ConfidenceDebug
-    escalation: HREscalation
+    hr_handoff: HRHandoff
     final_response: FinalResponse
     interaction_id: str
