@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from agent.answering import generate_grounded_answer
+from agent.answering import generate_grounded_answer, is_insufficient_answer
 
 
 class FakeLLM:
@@ -46,3 +46,9 @@ def test_generate_grounded_answer_returns_fallback_without_chunks() -> None:
     answer = generate_grounded_answer("Can I work abroad for six months?", [], llm=FakeLLM())
 
     assert "could not find enough information" in answer
+
+
+def test_is_insufficient_answer_detects_marker() -> None:
+    assert is_insufficient_answer("INSUFFICIENT_CONTEXT")
+    assert is_insufficient_answer("INSUFFICIENT_CONTEXT.")
+    assert not is_insufficient_answer("Employees in Estonia get 28 calendar days.")

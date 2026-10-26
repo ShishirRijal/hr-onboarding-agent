@@ -27,6 +27,8 @@ def build_hr_escalation(state: RetrievalState) -> HREscalation:
 def _escalation_reason(confidence_debug: ConfidenceDebug) -> str:
     if not confidence_debug.get("retrieved_count"):
         return "no_documents_found"
+    if confidence_debug.get("answer_declined"):
+        return "answer_declined"
     if not confidence_debug.get("has_answer"):
         return "no_answer_generated"
     if not confidence_debug.get("has_sources"):

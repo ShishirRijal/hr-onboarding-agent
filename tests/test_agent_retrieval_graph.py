@@ -277,9 +277,12 @@ def test_retrieval_graph_returns_low_confidence_without_chunks() -> None:
     assert result["confidence_debug"] == {
         "retrieved_count": 0,
         "top_score": 0.0,
+        "top_dense_score": 0.0,
+        "score_basis": "none",
         "has_answer": True,
         "has_sources": False,
         "has_rerank_signal": False,
+        "answer_declined": True,
     }
 
 
@@ -576,3 +579,68 @@ def test_retrieval_graph_escalates_when_no_documents_found() -> None:
     assert result["escalation"]["reason"] == "no_documents_found"
     assert result["escalation"]["candidate_sources"] == []
     assert result["final_response"]["escalated"] is True
+
+
+def _fused_chunk(dense_score: float) -> RetrievedChunk:
+    return RetrievedChunk(
+        chunk_id="chunk-1",
+        text="Annual leave in Estonia is 28 calendar days.",
+        metadata={"source_doc": "leave_policy", "source_file": "leave_absence_policy.md"},
+        score=0.0325,
+        source="fused",
+        ranks={"dense": 1, "bm25": 1},
+        scores={"dense": dense_score, "bm25": 9.1, "fused": 0.0325},
+    )
+
+
+def _build_graph(retriever, answer_generator=fake_answer_generator):
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    return build_retrieval_graph(
+        engine,
+        retriever=retriever,
+        answer_generator=answer_generator,
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+
+def test_unreranked_answer_uses_dense_similarity_and_caps_at_medium() -> None:
+    graph = _build_graph(FakeRetriever(results=[_fused_chunk(0.92)]))
+
+    result = graph.invoke({"question": "How much annual leave do I get?"})
+
+    assert result["confidence_debug"]["score_basis"] == "dense"
+    assert result["confidence_score"] == 0.74
+    assert result["confidence_label"] == "medium"
+    assert result["final_response"]["escalated"] is False
+
+
+def test_unreranked_off_topic_retrieval_escalates() -> None:
+    graph = _build_graph(FakeRetriever(results=[_fused_chunk(0.42)]))
+
+    result = graph.invoke({"question": "What's the weather in Tallinn?"})
+
+    assert result["confidence_label"] == "low"
+    assert result["escalation"]["reason"] == "low_confidence"
+
+
+def test_declined_answer_escalates_even_with_strong_retrieval() -> None:
+    graph = _build_graph(
+        FakeRetriever(results=[_fused_chunk(0.8)]),
+        answer_generator=lambda question, chunks: "INSUFFICIENT_CONTEXT",
+    )
+
+    result = graph.invoke({"question": "Can I bring my dog to the office?"})
+
+    assert result["answer_declined"] is True
+    assert "could not find enough information" in result["generated_answer"]["text"]
+    assert result["confidence_score"] == 0.0
+    assert result["escalation"]["reason"] == "answer_declined"
+    assert result["escalation"]["candidate_sources"]
+    assert result["final_response"]["text"] == ESCALATION_MESSAGE
