@@ -105,6 +105,8 @@ class MessageRoute(TypedDict):
 
 class RetrievalState(TypedDict, total=False):
     session_id: str
+    # The signed-in user asking, so the logged question belongs to them.
+    user_id: str
     question: str
     employee_context: EmployeeContext
     # Earlier turns of this chat, oldest first.

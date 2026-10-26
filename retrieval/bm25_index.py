@@ -30,6 +30,22 @@ class BM25Index:
     ) -> list[RetrievedChunk]:
         return bm25_search(self, query, top_k=top_k, filters=filters)
 
+    def add(self, chunks: Sequence[IngestedChunk]) -> None:
+        """Adds chunks in place, replacing any with the same id, so a running engine finds
+        them straight away. BM25 scores depend on the whole corpus, so it is rebuilt."""
+        for chunk in chunks:
+            chunk_id = stable_chunk_id(chunk.metadata)
+            tokens = tokenize_text(chunk.text)
+            if chunk_id in self.chunk_ids:
+                row = self.chunk_ids.index(chunk_id)
+                self.chunks[row] = chunk
+                self.tokenized_corpus[row] = tokens
+            else:
+                self.chunks.append(chunk)
+                self.chunk_ids.append(chunk_id)
+                self.tokenized_corpus.append(tokens)
+        self.bm25 = BM25Plus(self.tokenized_corpus) if self.tokenized_corpus else None
+
 
 def build_bm25_index(chunks: Sequence[IngestedChunk]) -> BM25Index:
     chunk_list = list(chunks)

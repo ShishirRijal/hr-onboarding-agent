@@ -10,6 +10,7 @@ from email.message import EmailMessage
 from typing import Any, Callable, Sequence
 from zoneinfo import ZoneInfo
 
+from .inbox import documents_checked, reason_text, workplace
 from .store import Interaction, InteractionStore
 
 logger = logging.getLogger(__name__)
@@ -18,20 +19,15 @@ DEFAULT_DIGEST_TO = "hr@nordtech.test"
 DEFAULT_DIGEST_FROM = "hr-assistant@nordtech.test"
 DEFAULT_DIGEST_TIME = "18:00"
 DEFAULT_DIGEST_TIMEZONE = "Europe/Tallinn"
-
-# Why the assistant couldn't answer, in words for HR (keys match escalation_reason).
-REASONS = {
-    "no_documents_found": "No HR document matched the question.",
-    "no_sources": "No HR document matched the question.",
-    "low_confidence": "The closest HR documents weren't a close enough match to answer from.",
-    "answer_declined": "The HR documents mention the topic but don't answer the question.",
-}
+DEFAULT_HR_INBOX_URL = "http://localhost:3000/hr"
 
 
 @dataclass(slots=True)
 class DigestSettings:
     recipient: str = DEFAULT_DIGEST_TO
     sender: str = DEFAULT_DIGEST_FROM
+    # Where HR answers the questions: the HR inbox in the web app.
+    inbox_url: str = DEFAULT_HR_INBOX_URL
     smtp_host: str = "localhost"
     smtp_port: int = 1025
     smtp_username: str | None = None
@@ -46,6 +42,7 @@ class DigestSettings:
         return cls(
             recipient=os.getenv("HR_DIGEST_TO", DEFAULT_DIGEST_TO),
             sender=os.getenv("HR_DIGEST_FROM", DEFAULT_DIGEST_FROM),
+            inbox_url=os.getenv("HR_INBOX_URL", DEFAULT_HR_INBOX_URL).rstrip("/"),
             smtp_host=os.getenv("SMTP_HOST", "localhost"),
             smtp_port=int(os.getenv("SMTP_PORT", "1025")),
             smtp_username=os.getenv("SMTP_USERNAME") or None,
@@ -113,28 +110,30 @@ def compose_hr_digest(
     if count == 1 and interactions[0].employee_email:
         message["Reply-To"] = interactions[0].employee_email
 
-    items = [_digest_item(interaction, local_zone) for interaction in interactions]
+    items = [_digest_item(interaction, local_zone, settings.inbox_url) for interaction in interactions]
     intro = (
         f"{count} employee {noun} came in through the HR assistant that the HR documents couldn't "
-        "answer. The employees asked for them to be sent to you; reply to them directly."
+        "answer. The employees asked for them to be sent to you. Answer them in the HR inbox: the "
+        "employee sees your answer in their chat, and the assistant can use it for similar questions."
     )
-    message.set_content(_plain_text(intro, items))
-    message.add_alternative(_html(intro, items), subtype="html")
+    message.set_content(_plain_text(intro, items, settings.inbox_url))
+    message.add_alternative(_html(intro, items, settings.inbox_url), subtype="html")
     return message
 
 
-def _digest_item(interaction: Interaction, local_zone: ZoneInfo) -> dict[str, Any]:
+def _digest_item(interaction: Interaction, local_zone: ZoneInfo, inbox_url: str) -> dict[str, Any]:
     asked_at = interaction.escalated_at or interaction.created_at
     if asked_at.tzinfo is None:
         asked_at = asked_at.replace(tzinfo=timezone.utc)
     return {
         "name": interaction.employee_name or "An employee",
         "email": interaction.employee_email,
-        "workplace": _workplace(interaction.employee_context or {}),
+        "workplace": workplace(interaction.employee_context or {}),
         "asked_at": _short_time(asked_at.astimezone(local_zone)),
         "question": interaction.question,
-        "reason": REASONS.get(interaction.escalation_reason or "", "The HR documents don't cover this."),
-        "documents": _documents_checked(interaction.hr_handoff or {}),
+        "reason": reason_text(interaction.escalation_reason),
+        "documents": documents_checked(interaction.hr_handoff or {}),
+        "answer_url": f"{inbox_url}/q/{interaction.id}",
     }
 
 
@@ -142,27 +141,8 @@ def _short_time(moment: datetime) -> str:
     return f"{moment.day} {moment:%b, %H:%M}"
 
 
-def _workplace(employee_context: dict[str, Any]) -> str:
-    country = employee_context.get("employee_country") or employee_context.get("office_country")
-    location = employee_context.get("office_location")
-    if country == "Remote":
-        return "Remote"
-    return ", ".join(part for part in (location, country) if part) or "Not given"
-
-
-def _documents_checked(handoff: dict[str, Any]) -> list[str]:
-    titles: list[str] = []
-    for source in handoff.get("candidate_sources", []) or []:
-        # Section paths start with the document's title: "NordTech Solutions — Leave & Absence Policy > …".
-        title = str(source.get("section_path") or source.get("source_file") or "").split(" > ")[0]
-        title = title.removeprefix("NordTech Solutions — ").strip()
-        if title and title not in titles:
-            titles.append(title)
-    return titles
-
-
-def _plain_text(intro: str, items: list[dict[str, Any]]) -> str:
-    blocks = [intro]
+def _plain_text(intro: str, items: list[dict[str, Any]], inbox_url: str) -> str:
+    blocks = [intro, f"HR inbox: {inbox_url}"]
     for number, item in enumerate(items, start=1):
         contact = f"{item['name']} <{item['email']}>" if item["email"] else item["name"]
         lines = [
@@ -174,11 +154,12 @@ def _plain_text(intro: str, items: list[dict[str, Any]]) -> str:
         ]
         if item["documents"]:
             lines.append(f"   Documents checked: {', '.join(item['documents'])}")
+        lines.append(f"   Answer it: {item['answer_url']}")
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks) + "\n"
 
 
-def _html(intro: str, items: list[dict[str, Any]]) -> str:
+def _html(intro: str, items: list[dict[str, Any]], inbox_url: str) -> str:
     def row(label: str, value: str) -> str:
         return (
             f'<tr><td style="color:#6b707a;padding:2px 12px 2px 0;vertical-align:top;white-space:nowrap">{label}</td>'
@@ -206,12 +187,17 @@ def _html(intro: str, items: list[dict[str, Any]]) -> str:
             '<div style="border:1px solid #e3e6e9;border-radius:12px;padding:16px;margin:0 0 12px">'
             f'<p style="margin:0 0 10px;font-size:16px;font-weight:600">{html.escape(item["question"])}</p>'
             f'<table style="font-size:14px;border-collapse:collapse">{"".join(rows)}</table>'
+            f'<p style="margin:12px 0 0;font-size:14px"><a href="{html.escape(item["answer_url"])}" '
+            'style="color:#2b8659;font-weight:600">Answer in the HR inbox</a></p>'
             "</div>"
         )
 
     return (
         '<div style="font-family:Inter,Arial,sans-serif;color:#2f313f;max-width:640px">'
         f'<p style="font-size:15px;line-height:1.5">{html.escape(intro)}</p>'
+        f'<p style="margin:0 0 16px"><a href="{html.escape(inbox_url)}" style="display:inline-block;'
+        'background:#2b8659;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;'
+        'padding:10px 18px;border-radius:9999px">Open the HR inbox</a></p>'
         f'{"".join(cards)}'
         "</div>"
     )

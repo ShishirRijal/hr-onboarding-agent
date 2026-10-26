@@ -90,3 +90,18 @@ def test_failed_send_leaves_questions_for_next_time(tmp_path: Path) -> None:
     with pytest.raises(OSError):
         send_hr_digest(store, DigestSettings(), send=broken_send, now=NOW)
     assert len(store.pending_hr_requests()) == 1
+
+
+def test_digest_links_each_question_to_the_hr_inbox(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    interaction_id = _ask(store, "Can I bring my dog to the office?", send=True)
+
+    message = compose_hr_digest(
+        store.pending_hr_requests(), DigestSettings(inbox_url="https://hr.nordtech.test/hr"), now=NOW
+    )
+
+    text = message.get_body(preferencelist=("plain",)).get_content()
+    assert "HR inbox: https://hr.nordtech.test/hr" in text
+    assert f"Answer it: https://hr.nordtech.test/hr/q/{interaction_id}" in text
+    page = message.get_body(preferencelist=("html",)).get_content()
+    assert f'href="https://hr.nordtech.test/hr/q/{interaction_id}"' in page
