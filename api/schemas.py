@@ -36,8 +36,19 @@ class ChatResponse(BaseModel):
     sources: list[Source]
     confidence_score: float
     confidence_label: str
-    escalated: bool
+    answered: bool
+    escalation_status: str | None = None
     escalation_reason: str | None = None
+
+
+class HRRequest(BaseModel):
+    ask_hr: bool
+
+
+class HRRequestResponse(BaseModel):
+    interaction_id: str
+    escalation_status: str
+    message: str
 
 
 class SessionMessage(BaseModel):
@@ -48,5 +59,6 @@ class SessionMessage(BaseModel):
     sources: list[Source]
     confidence_score: float
     confidence_label: str
-    escalated: bool
+    answered: bool
+    escalation_status: str | None = None
     escalation_reason: str | None = None

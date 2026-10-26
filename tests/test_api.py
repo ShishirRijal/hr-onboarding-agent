@@ -1,11 +1,26 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
 from api.main import create_app
+
+ANSWER_SOURCE = {
+    "chunk_id": "chunk-1",
+    "source_doc": "leave_policy",
+    "source_file": "leave_absence_policy.md",
+    "section_path": "Leave > Estonia",
+    "score": 0.03,
+}
+NOT_FOUND = {
+    "confidence_score": 0.0,
+    "confidence_label": "low",
+    "final_response": {"text": "Not in the HR documents. Ask HR?", "sources": [], "answered": False},
+    "hr_handoff": {"reason": "answer_declined"},
+}
 
 
 class FakeGraph:
@@ -14,10 +29,7 @@ class FakeGraph:
         self.result = result
         self.error = error
 
-    def invoke(self, state):
-        self.states.append(state)
-        if self.error is not None:
-            raise self.error
+    def _result(self, state):
         return {
             **state,
             "interaction_id": "interaction-1",
@@ -25,60 +37,93 @@ class FakeGraph:
             "confidence_label": "medium",
             "final_response": {
                 "text": "Employees in Estonia get 28 calendar days.",
-                "sources": [
-                    {
-                        "chunk_id": "chunk-1",
-                        "source_file": "leave_absence_policy.md",
-                        "section_path": "Leave > Estonia",
-                        "score": 0.03,
-                    }
-                ],
-                "escalated": False,
+                "sources": [ANSWER_SOURCE],
+                "answered": True,
             },
             **(self.result or {}),
         }
 
+    def invoke(self, state):
+        self.states.append(state)
+        if self.error is not None:
+            raise self.error
+        return self._result(state)
+
+    def stream(self, state, stream_mode):
+        self.states.append(state)
+        if self.error is not None:
+            raise self.error
+        result = self._result(state)
+        yield "updates", {"resolve_filters": {"resolved_filters": {"country": "Estonia"}}}
+        yield "updates", {"retrieve_documents": {"retrieved_chunks": [{"metadata": {"source_doc": "leave_policy"}}]}}
+        yield "updates", {"score_confidence": {"confidence_label": result["confidence_label"]}}
+        if result["final_response"]["answered"]:
+            for token in ("Employees in Estonia ", "get 28 calendar days."):
+                yield "messages", (SimpleNamespace(content=token), {"langgraph_node": "generate_answer"})
+        yield "updates", {"log_interaction": {key: value for key, value in result.items() if key not in state}}
+
 
 class FakeStore:
+    def __init__(self) -> None:
+        self.choices: list[tuple[str, bool]] = []
+
     def list_session(self, session_id):
         return [
             SimpleNamespace(
                 id="interaction-1",
                 created_at=datetime(2026, 10, 26, tzinfo=timezone.utc),
-                question="How much annual leave do I get?",
-                answer="28 calendar days.",
-                sources=[{"chunk_id": "chunk-1", "source_file": "leave_absence_policy.md", "score": 0.03}],
-                confidence_score=0.7,
-                confidence_label="medium",
-                escalated=False,
-                escalation_reason=None,
+                question="Can I bring my dog?",
+                answer="Not in the HR documents. Ask HR?",
+                sources=[],
+                confidence_score=0.0,
+                confidence_label="low",
+                answered=False,
+                escalation_status="requested",
+                escalation_reason="answer_declined",
             )
         ]
 
+    def record_hr_choice(self, interaction_id, *, ask_hr):
+        if interaction_id == "missing":
+            return None
+        if interaction_id == "answered":
+            raise ValueError("answered")
+        self.choices.append((interaction_id, ask_hr))
+        return SimpleNamespace(id=interaction_id, escalation_status="requested" if ask_hr else "declined")
+
+
+def _client(graph: FakeGraph | None = None, store: FakeStore | None = None) -> TestClient:
+    return TestClient(create_app(graph=graph or FakeGraph(), store=store or FakeStore()))
+
+
+def _events(response) -> list[tuple[str, dict[str, object]]]:
+    events = []
+    for block in response.text.strip().split("\n\n"):
+        lines = dict(line.split(": ", 1) for line in block.splitlines())
+        events.append((lines["event"], json.loads(lines["data"])))
+    return events
+
 
 def test_health() -> None:
-    with TestClient(create_app(graph=FakeGraph(), store=FakeStore())) as client:
+    with _client() as client:
         assert client.get("/health").json() == {"status": "ok"}
 
 
 def test_chat_passes_question_and_context_and_returns_answer() -> None:
     graph = FakeGraph()
-    with TestClient(create_app(graph=graph, store=FakeStore())) as client:
+    with _client(graph) as client:
         response = client.post(
             "/chat",
-            json={
-                "message": "How much annual leave do I get?",
-                "employee_context": {"employee_country": "Estonia"},
-            },
+            json={"message": "How much annual leave do I get?", "employee_context": {"employee_country": "Estonia"}},
         )
 
     assert response.status_code == 200
     body = response.json()
     assert body["answer"] == "Employees in Estonia get 28 calendar days."
     assert body["sources"][0]["source_file"] == "leave_absence_policy.md"
-    assert body["escalated"] is False
+    assert body["answered"] is True
+    assert body["escalation_status"] is None
     assert body["interaction_id"] == "interaction-1"
-    assert body["session_id"]
     state = graph.states[0]
     assert state["question"] == "How much annual leave do I get?"
     assert state["employee_context"] == {"employee_country": "Estonia"}
@@ -86,40 +131,89 @@ def test_chat_passes_question_and_context_and_returns_answer() -> None:
     assert state["retrieval_config"] == {"apply_reranker": False}
 
 
-def test_chat_keeps_given_session_and_reports_escalation() -> None:
-    graph = FakeGraph(
-        result={
-            "confidence_score": 0.0,
-            "confidence_label": "low",
-            "final_response": {"text": "Logged for HR.", "sources": [], "escalated": True},
-            "escalation": {"reason": "answer_declined"},
-        }
-    )
-    with TestClient(create_app(graph=graph, store=FakeStore())) as client:
+def test_chat_offers_hr_when_the_documents_have_no_answer() -> None:
+    with _client(FakeGraph(result=NOT_FOUND)) as client:
         body = client.post("/chat", json={"message": "Can I bring my dog?", "session_id": "session-7"}).json()
 
     assert body["session_id"] == "session-7"
-    assert body["escalated"] is True
+    assert body["answered"] is False
+    assert body["escalation_status"] == "offered"
     assert body["escalation_reason"] == "answer_declined"
 
 
 def test_chat_rejects_empty_message() -> None:
-    with TestClient(create_app(graph=FakeGraph(), store=FakeStore())) as client:
+    with _client() as client:
         assert client.post("/chat", json={"message": ""}).status_code == 422
 
 
 def test_chat_returns_503_when_agent_fails() -> None:
-    graph = FakeGraph(error=RuntimeError("OpenAI is down"))
-    with TestClient(create_app(graph=graph, store=FakeStore())) as client:
+    with _client(FakeGraph(error=RuntimeError("OpenAI is down"))) as client:
         response = client.post("/chat", json={"message": "How much annual leave do I get?"})
 
     assert response.status_code == 503
     assert "OpenAI" not in response.text
 
 
-def test_session_messages_returns_history() -> None:
-    with TestClient(create_app(graph=FakeGraph(), store=FakeStore())) as client:
+def test_chat_stream_sends_progress_tokens_and_final_answer() -> None:
+    with _client() as client:
+        response = client.post("/chat/stream", json={"message": "How much annual leave do I get?", "session_id": "s-1"})
+
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = _events(response)
+    names = [name for name, _ in events]
+    assert names[0] == "session"
+    assert names[-1] == "done"
+    statuses = [payload for name, payload in events if name == "status"]
+    assert [status["stage"] for status in statuses] == ["searching", "reading", "checking"]
+    assert statuses[0]["label"] == "Searching HR documents for Estonia"
+    assert statuses[1]["documents"] == ["leave_policy"]
+    tokens = "".join(payload["text"] for name, payload in events if name == "token")
+    assert tokens == "Employees in Estonia get 28 calendar days."
+    done = events[-1][1]
+    assert done["answer"] == "Employees in Estonia get 28 calendar days."
+    assert done["session_id"] == "s-1"
+    assert done["interaction_id"] == "interaction-1"
+
+
+def test_chat_stream_offers_hr_without_tokens_when_not_found() -> None:
+    with _client(FakeGraph(result=NOT_FOUND)) as client:
+        events = _events(client.post("/chat/stream", json={"message": "Can I bring my dog?"}))
+
+    assert not [name for name, _ in events if name == "token"]
+    assert [payload["stage"] for name, payload in events if name == "status"][-1] == "not_found"
+    assert events[-1][1]["escalation_status"] == "offered"
+
+
+def test_chat_stream_reports_errors_as_an_event() -> None:
+    with _client(FakeGraph(error=RuntimeError("OpenAI is down"))) as client:
+        events = _events(client.post("/chat/stream", json={"message": "How much annual leave do I get?"}))
+
+    assert events[-1] == ("error", {"detail": "The assistant is temporarily unavailable."})
+
+
+def test_hr_request_records_the_employees_choice() -> None:
+    store = FakeStore()
+    with _client(store=store) as client:
+        yes = client.post("/interactions/interaction-1/hr-request", json={"ask_hr": True})
+        no = client.post("/interactions/interaction-2/hr-request", json={"ask_hr": False})
+
+    assert yes.status_code == 200
+    assert yes.json()["escalation_status"] == "requested"
+    assert "HR team" in yes.json()["message"]
+    assert no.json()["escalation_status"] == "declined"
+    assert store.choices == [("interaction-1", True), ("interaction-2", False)]
+
+
+def test_hr_request_rejects_unknown_or_answered_questions() -> None:
+    with _client() as client:
+        assert client.post("/interactions/missing/hr-request", json={"ask_hr": True}).status_code == 404
+        assert client.post("/interactions/answered/hr-request", json={"ask_hr": True}).status_code == 409
+
+
+def test_session_messages_returns_history_with_hr_status() -> None:
+    with _client() as client:
         messages = client.get("/sessions/session-7/messages").json()
 
-    assert messages[0]["question"] == "How much annual leave do I get?"
-    assert messages[0]["sources"][0]["source_file"] == "leave_absence_policy.md"
+    assert messages[0]["question"] == "Can I bring my dog?"
+    assert messages[0]["answered"] is False
+    assert messages[0]["escalation_status"] == "requested"

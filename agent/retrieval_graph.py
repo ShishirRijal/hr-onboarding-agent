@@ -13,8 +13,8 @@ from retrieval import (
     retrieve,
 )
 
-from .answering import NO_ANSWER_MESSAGE, generate_grounded_answer, is_insufficient_answer
-from .escalation import ESCALATION_MESSAGE, build_hr_escalation
+from .answering import generate_grounded_answer, is_insufficient_answer
+from .escalation import NOT_FOUND_MESSAGE, build_hr_handoff
 from .state import (
     AnswerSource,
     EmployeeContext,
@@ -31,7 +31,7 @@ DEFAULT_COUNTRY_KEYS = (
     "office_country",
 )
 MAX_ANSWER_SOURCES = 3
-ESCALATE_CONFIDENCE_LABELS = frozenset({"low"})
+NOT_FOUND_CONFIDENCE_LABELS = frozenset({"low"})
 HIGH_CONFIDENCE = 0.75
 MEDIUM_CONFIDENCE = 0.45
 # Without a reranker, confidence comes from BGE cosine similarity, which is a weak
@@ -72,25 +72,31 @@ def build_retrieval_graph(
             retriever=retriever,
         ),
     )
+    graph.add_node("score_confidence", _score_confidence_node)
     graph.add_node(
         "generate_answer",
         _make_generate_answer_node(answer_generator=answer_generator or generate_grounded_answer),
     )
-    graph.add_node("score_confidence", _score_confidence_node)
     graph.add_node("respond_to_user", _respond_to_user_node)
-    graph.add_node("escalate_to_hr", _escalate_to_hr_node)
+    graph.add_node("answer_not_found", _answer_not_found_node)
     graph.add_node("log_interaction", _make_log_interaction_node(interaction_logger))
     graph.add_edge(start_token, "resolve_filters")
     graph.add_edge("resolve_filters", "retrieve_documents")
-    graph.add_edge("retrieve_documents", "generate_answer")
-    graph.add_edge("generate_answer", "score_confidence")
+    graph.add_edge("retrieve_documents", "score_confidence")
+    # Retrieval is scored before generating, so a weak search never produces (or streams)
+    # an answer that would then be withdrawn.
     graph.add_conditional_edges(
         "score_confidence",
         _route_after_confidence,
-        {"respond_to_user": "respond_to_user", "escalate_to_hr": "escalate_to_hr"},
+        {"generate_answer": "generate_answer", "answer_not_found": "answer_not_found"},
+    )
+    graph.add_conditional_edges(
+        "generate_answer",
+        _route_after_answer,
+        {"respond_to_user": "respond_to_user", "answer_not_found": "answer_not_found"},
     )
     graph.add_edge("respond_to_user", "log_interaction")
-    graph.add_edge("escalate_to_hr", "log_interaction")
+    graph.add_edge("answer_not_found", "log_interaction")
     graph.add_edge("log_interaction", end_token)
     return graph.compile()
 
@@ -156,17 +162,19 @@ def _make_generate_answer_node(
         question = _clean_required_value(state.get("question"), field_name="question")
         chunks = state.get("retrieved_chunks", [])
 
-        if not chunks:
-            answer: GeneratedAnswer = {"text": NO_ANSWER_MESSAGE, "sources": []}
-            return {"generated_answer": answer, "answer_declined": True}
-
         text = answer_generator(question, chunks).strip()
-        answer_declined = is_insufficient_answer(text)
-        answer = {
-            "text": NO_ANSWER_MESSAGE if answer_declined else text,
-            "sources": _build_answer_sources(chunks),
+        answer: GeneratedAnswer = {"text": text, "sources": _build_answer_sources(chunks)}
+        if text and not is_insufficient_answer(text):
+            return {"generated_answer": answer, "answer_declined": False}
+
+        # The model found the excerpts insufficient, so there is no answer to give.
+        return {
+            "generated_answer": {"text": "", "sources": answer["sources"]},
+            "answer_declined": True,
+            "confidence_score": 0.0,
+            "confidence_label": "low",
+            "confidence_debug": {**state.get("confidence_debug", {}), "answer_declined": True},
         }
-        return {"generated_answer": answer, "answer_declined": answer_declined}
 
     return _generate_answer_node
 
@@ -210,7 +218,6 @@ def _build_answer_sources(chunks: list[dict[str, Any]]) -> list[AnswerSource]:
 
 def _score_confidence_node(state: RetrievalState) -> dict[str, Any]:
     chunks = state.get("retrieved_chunks", [])
-    generated_answer = state.get("generated_answer", {"text": "", "sources": []})
     top_chunk = chunks[0] if chunks else {}
     scores = top_chunk.get("scores", {}) if top_chunk else {}
     top_score = float(top_chunk.get("score", 0.0) or 0.0)
@@ -218,19 +225,15 @@ def _score_confidence_node(state: RetrievalState) -> dict[str, Any]:
         (float((chunk.get("scores", {}) or {}).get("dense", 0.0) or 0.0) for chunk in chunks),
         default=0.0,
     )
-    has_answer = bool(str(generated_answer.get("text", "")).strip())
-    has_sources = bool(generated_answer.get("sources", []))
+    has_sources = bool(_build_answer_sources(chunks))
     has_rerank_signal = "rerank" in scores
-    answer_declined = bool(state.get("answer_declined", False))
 
     confidence_score = _calculate_confidence_score(
         retrieved_count=len(chunks),
         top_score=top_score,
         top_dense_score=top_dense_score,
-        has_answer=has_answer,
         has_sources=has_sources,
         has_rerank_signal=has_rerank_signal,
-        answer_declined=answer_declined,
     )
 
     return {
@@ -241,10 +244,9 @@ def _score_confidence_node(state: RetrievalState) -> dict[str, Any]:
             "top_score": top_score,
             "top_dense_score": top_dense_score,
             "score_basis": _score_basis(len(chunks), has_rerank_signal),
-            "has_answer": has_answer,
             "has_sources": has_sources,
             "has_rerank_signal": has_rerank_signal,
-            "answer_declined": answer_declined,
+            "answer_declined": False,
         },
     }
 
@@ -260,12 +262,10 @@ def _calculate_confidence_score(
     retrieved_count: int,
     top_score: float,
     top_dense_score: float,
-    has_answer: bool,
     has_sources: bool,
     has_rerank_signal: bool,
-    answer_declined: bool,
 ) -> float:
-    if retrieved_count == 0 or not has_answer or not has_sources or answer_declined:
+    if retrieved_count == 0 or not has_sources:
         return 0.0
 
     if not has_rerank_signal:
@@ -281,9 +281,13 @@ def _calculate_confidence_score(
 
 
 def _route_after_confidence(state: RetrievalState) -> str:
-    if state.get("confidence_label", "low") in ESCALATE_CONFIDENCE_LABELS:
-        return "escalate_to_hr"
-    return "respond_to_user"
+    if state.get("confidence_label", "low") in NOT_FOUND_CONFIDENCE_LABELS:
+        return "answer_not_found"
+    return "generate_answer"
+
+
+def _route_after_answer(state: RetrievalState) -> str:
+    return "answer_not_found" if state.get("answer_declined") else "respond_to_user"
 
 
 def _respond_to_user_node(state: RetrievalState) -> dict[str, Any]:
@@ -291,19 +295,17 @@ def _respond_to_user_node(state: RetrievalState) -> dict[str, Any]:
     response: FinalResponse = {
         "text": generated_answer.get("text", ""),
         "sources": generated_answer.get("sources", []),
-        "escalated": False,
+        "answered": True,
     }
     return {"final_response": response}
 
 
-def _escalate_to_hr_node(state: RetrievalState) -> dict[str, Any]:
-    response: FinalResponse = {
-        "text": ESCALATION_MESSAGE,
-        "sources": [],
-        "escalated": True,
-    }
+def _answer_not_found_node(state: RetrievalState) -> dict[str, Any]:
+    # Nothing goes to HR yet: the employee is asked first, and their choice is recorded
+    # against the logged interaction.
+    response: FinalResponse = {"text": NOT_FOUND_MESSAGE, "sources": [], "answered": False}
     return {
-        "escalation": build_hr_escalation(state),
+        "hr_handoff": build_hr_handoff(state, _build_answer_sources(state.get("retrieved_chunks", []))),
         "final_response": response,
     }
 

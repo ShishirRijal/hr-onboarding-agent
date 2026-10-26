@@ -104,13 +104,13 @@ def main() -> None:
     print("----------")
     print(f"{result.get('confidence_label', 'unknown')} ({result.get('confidence_score', 0.0)})")
 
-    escalation = result.get("escalation")
-    if escalation:
-        print("\nEscalated to HR")
-        print("---------------")
-        print(f"reason={escalation['reason']} | contact={escalation['contact']}")
-        print(f"draft answer (not shown to employee): {escalation['draft_answer']}")
-        sources = escalation["candidate_sources"]
+    handoff = result.get("hr_handoff")
+    if handoff:
+        print("\nNot found in the HR documents (employee is offered to ask HR)")
+        print("-------------------------------------------------------------")
+        print(f"reason={handoff['reason']} | contact={handoff['contact']}")
+        print(f"draft answer (not shown to employee): {handoff['draft_answer'] or '(none)'}")
+        sources = handoff["candidate_sources"]
 
     print("\nSources")
     print("-------")

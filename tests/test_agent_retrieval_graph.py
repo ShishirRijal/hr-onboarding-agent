@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from agent import HR_CONTACT_EMAIL, build_retrieval_graph
-from agent.escalation import ESCALATION_MESSAGE
+from agent.escalation import NOT_FOUND_MESSAGE
 from retrieval import RetrievedChunk, RetrievalEngine
 
 
@@ -270,8 +270,8 @@ def test_retrieval_graph_returns_low_confidence_without_chunks() -> None:
     )
 
     assert result["retrieved_chunks"] == []
-    assert result["generated_answer"]["sources"] == []
-    assert "could not find enough information" in result["generated_answer"]["text"]
+    assert "generated_answer" not in result
+    assert result["final_response"]["answered"] is False
     assert result["confidence_score"] == 0.0
     assert result["confidence_label"] == "low"
     assert result["confidence_debug"] == {
@@ -279,10 +279,9 @@ def test_retrieval_graph_returns_low_confidence_without_chunks() -> None:
         "top_score": 0.0,
         "top_dense_score": 0.0,
         "score_basis": "none",
-        "has_answer": True,
         "has_sources": False,
         "has_rerank_signal": False,
-        "answer_declined": True,
+        "answer_declined": False,
     }
 
 
@@ -455,12 +454,12 @@ def test_retrieval_graph_responds_to_user_on_high_confidence() -> None:
     result = graph.invoke({"question": "How much annual leave do I get?"})
 
     assert "respond_to_user" in graph.visited
-    assert "escalate_to_hr" not in graph.visited
-    assert "escalation" not in result
+    assert "answer_not_found" not in graph.visited
+    assert "hr_handoff" not in result
     assert result["final_response"] == {
         "text": "Annual leave in Estonia is 28 calendar days.",
         "sources": result["generated_answer"]["sources"],
-        "escalated": False,
+        "answered": True,
     }
 
 
@@ -496,10 +495,10 @@ def test_retrieval_graph_responds_to_user_on_medium_confidence() -> None:
 
     assert result["confidence_label"] == "medium"
     assert "respond_to_user" in graph.visited
-    assert result["final_response"]["escalated"] is False
+    assert result["final_response"]["answered"] is True
 
 
-def test_retrieval_graph_escalates_to_hr_on_low_confidence() -> None:
+def test_low_confidence_offers_hr_without_generating_an_answer() -> None:
     retriever = FakeRetriever(
         results=[
             RetrievedChunk(
@@ -538,26 +537,34 @@ def test_retrieval_graph_escalates_to_hr_on_low_confidence() -> None:
     )
 
     assert result["confidence_label"] == "low"
-    assert "escalate_to_hr" in graph.visited
+    assert "answer_not_found" in graph.visited
+    assert "generate_answer" not in graph.visited
     assert "respond_to_user" not in graph.visited
     assert result["final_response"] == {
-        "text": ESCALATION_MESSAGE,
+        "text": NOT_FOUND_MESSAGE,
         "sources": [],
-        "escalated": True,
+        "answered": False,
     }
-    assert result["escalation"] == {
+    assert result["hr_handoff"] == {
         "reason": "low_confidence",
         "contact": HR_CONTACT_EMAIL,
         "question": "How do I raise a grievance against my manager?",
         "employee_context": {"employee_country": "Estonia"},
         "confidence_score": 0.24,
         "confidence_label": "low",
-        "draft_answer": "Grievances are handled case by case.",
-        "candidate_sources": result["generated_answer"]["sources"],
+        "draft_answer": "",
+        "candidate_sources": [
+            {
+                "chunk_id": "chunk-1",
+                "score": 0.2,
+                "source_doc": "employee_handbook",
+                "source_file": "employee_handbook_v2.1.md",
+            }
+        ],
     }
 
 
-def test_retrieval_graph_escalates_when_no_documents_found() -> None:
+def test_no_documents_found_offers_hr() -> None:
     retriever = FakeRetriever(results=[])
     engine = RetrievalEngine(
         client=SimpleNamespace(),
@@ -575,10 +582,10 @@ def test_retrieval_graph_escalates_when_no_documents_found() -> None:
 
     result = graph.invoke({"question": "Can I bring my dog to the Porto office?"})
 
-    assert "escalate_to_hr" in graph.visited
-    assert result["escalation"]["reason"] == "no_documents_found"
-    assert result["escalation"]["candidate_sources"] == []
-    assert result["final_response"]["escalated"] is True
+    assert "answer_not_found" in graph.visited
+    assert result["hr_handoff"]["reason"] == "no_documents_found"
+    assert result["hr_handoff"]["candidate_sources"] == []
+    assert result["final_response"]["answered"] is False
 
 
 def _fused_chunk(dense_score: float) -> RetrievedChunk:
@@ -618,19 +625,20 @@ def test_unreranked_answer_uses_dense_similarity_and_caps_at_medium() -> None:
     assert result["confidence_debug"]["score_basis"] == "dense"
     assert result["confidence_score"] == 0.74
     assert result["confidence_label"] == "medium"
-    assert result["final_response"]["escalated"] is False
+    assert result["final_response"]["answered"] is True
 
 
-def test_unreranked_off_topic_retrieval_escalates() -> None:
+def test_unreranked_off_topic_retrieval_offers_hr() -> None:
     graph = _build_graph(FakeRetriever(results=[_fused_chunk(0.42)]))
 
     result = graph.invoke({"question": "What's the weather in Tallinn?"})
 
     assert result["confidence_label"] == "low"
-    assert result["escalation"]["reason"] == "low_confidence"
+    assert "generate_answer" not in graph.visited
+    assert result["hr_handoff"]["reason"] == "low_confidence"
 
 
-def test_declined_answer_escalates_even_with_strong_retrieval() -> None:
+def test_declined_answer_offers_hr_even_with_strong_retrieval() -> None:
     graph = _build_graph(
         FakeRetriever(results=[_fused_chunk(0.8)]),
         answer_generator=lambda question, chunks: "INSUFFICIENT_CONTEXT",
@@ -639,11 +647,12 @@ def test_declined_answer_escalates_even_with_strong_retrieval() -> None:
     result = graph.invoke({"question": "Can I bring my dog to the office?"})
 
     assert result["answer_declined"] is True
-    assert "could not find enough information" in result["generated_answer"]["text"]
+    assert result["generated_answer"]["text"] == ""
     assert result["confidence_score"] == 0.0
-    assert result["escalation"]["reason"] == "answer_declined"
-    assert result["escalation"]["candidate_sources"]
-    assert result["final_response"]["text"] == ESCALATION_MESSAGE
+    assert result["confidence_label"] == "low"
+    assert result["hr_handoff"]["reason"] == "answer_declined"
+    assert result["hr_handoff"]["candidate_sources"]
+    assert result["final_response"] == {"text": NOT_FOUND_MESSAGE, "sources": [], "answered": False}
 
 
 def test_graph_logs_every_interaction_and_returns_its_id() -> None:
@@ -674,4 +683,4 @@ def test_graph_logs_every_interaction_and_returns_its_id() -> None:
     assert graph.visited[-1] == "log_interaction"
     assert result["interaction_id"] == "interaction-1"
     assert logged_states[0]["session_id"] == "session-1"
-    assert logged_states[0]["final_response"]["escalated"] is False
+    assert logged_states[0]["final_response"]["answered"] is True
