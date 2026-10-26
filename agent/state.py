@@ -72,6 +72,23 @@ class ConfidenceDebug(TypedDict, total=False):
     has_rerank_signal: bool
 
 
+class HREscalation(TypedDict):
+    reason: str
+    contact: str
+    question: str
+    employee_context: EmployeeContext
+    confidence_score: float
+    confidence_label: str
+    draft_answer: str
+    candidate_sources: list[AnswerSource]
+
+
+class FinalResponse(TypedDict):
+    text: str
+    sources: list[AnswerSource]
+    escalated: bool
+
+
 class RetrievalState(TypedDict, total=False):
     question: str
     employee_context: EmployeeContext
@@ -84,3 +101,5 @@ class RetrievalState(TypedDict, total=False):
     confidence_score: float
     confidence_label: str
     confidence_debug: ConfidenceDebug
+    escalation: HREscalation
+    final_response: FinalResponse

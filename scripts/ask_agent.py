@@ -93,16 +93,24 @@ def main() -> None:
     }
 
     result = graph.invoke(state)
-    answer = result.get("generated_answer", {})
-    sources = answer.get("sources", [])
+    response = result.get("final_response", {})
+    sources = response.get("sources", [])
 
     print("\nAnswer")
     print("------")
-    print(answer.get("text", "No answer generated."))
+    print(response.get("text", "No answer generated."))
 
     print("\nConfidence")
     print("----------")
     print(f"{result.get('confidence_label', 'unknown')} ({result.get('confidence_score', 0.0)})")
+
+    escalation = result.get("escalation")
+    if escalation:
+        print("\nEscalated to HR")
+        print("---------------")
+        print(f"reason={escalation['reason']} | contact={escalation['contact']}")
+        print(f"draft answer (not shown to employee): {escalation['draft_answer']}")
+        sources = escalation["candidate_sources"]
 
     print("\nSources")
     print("-------")

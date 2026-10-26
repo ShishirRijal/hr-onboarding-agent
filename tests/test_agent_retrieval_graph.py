@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from agent import build_retrieval_graph
+from agent import HR_CONTACT_EMAIL, build_retrieval_graph
+from agent.escalation import ESCALATION_MESSAGE
 from retrieval import RetrievedChunk, RetrievalEngine
 
 
@@ -42,35 +43,54 @@ class FakeRetriever:
 
 
 class FakeCompiledGraph:
-    def __init__(self, nodes: dict[str, object], edges: list[tuple[object, str]]) -> None:
+    def __init__(
+        self,
+        nodes: dict[str, object],
+        edges: dict[object, str],
+        conditional_edges: dict[str, tuple[object, dict[str, str]]],
+    ) -> None:
         self.nodes = nodes
         self.edges = edges
+        self.conditional_edges = conditional_edges
+        self.visited: list[str] = []
 
     def invoke(self, state):
         current_state = dict(state)
-        for source, target in self.edges:
-            if target == "__end__":
-                continue
+        current = "__start__"
+        self.visited = []
+        while True:
+            if current in self.conditional_edges:
+                router, path_map = self.conditional_edges[current]
+                target = path_map[router(current_state)]
+            else:
+                target = self.edges[current]
 
-            result = self.nodes[target](current_state)
-            current_state.update(result)
-        return current_state
+            if target == "__end__":
+                return current_state
+
+            self.visited.append(target)
+            current_state.update(self.nodes[target](current_state))
+            current = target
 
 
 class FakeStateGraph:
     def __init__(self, state_schema) -> None:
         self.state_schema = state_schema
         self.nodes: dict[str, object] = {}
-        self.edges: list[tuple[object, str]] = []
+        self.edges: dict[object, str] = {}
+        self.conditional_edges: dict[str, tuple[object, dict[str, str]]] = {}
 
     def add_node(self, name, fn):
         self.nodes[name] = fn
 
     def add_edge(self, source, target):
-        self.edges.append((source, target))
+        self.edges[source] = target
+
+    def add_conditional_edges(self, source, path, path_map):
+        self.conditional_edges[source] = (path, path_map)
 
     def compile(self):
-        return FakeCompiledGraph(self.nodes, self.edges)
+        return FakeCompiledGraph(self.nodes, self.edges, self.conditional_edges)
 
 
 def fake_answer_generator(question, chunks):
@@ -410,3 +430,149 @@ def test_retrieval_graph_caps_confidence_below_perfect_score() -> None:
 
     assert result["confidence_score"] == 0.97
     assert result["confidence_label"] == "high"
+
+
+def test_retrieval_graph_responds_to_user_on_high_confidence() -> None:
+    retriever = FakeRetriever()
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    graph = build_retrieval_graph(
+        engine,
+        retriever=retriever,
+        answer_generator=fake_answer_generator,
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+    result = graph.invoke({"question": "How much annual leave do I get?"})
+
+    assert graph.visited[-1] == "respond_to_user"
+    assert "escalate_to_hr" not in graph.visited
+    assert "escalation" not in result
+    assert result["final_response"] == {
+        "text": "Annual leave in Estonia is 28 calendar days.",
+        "sources": result["generated_answer"]["sources"],
+        "escalated": False,
+    }
+
+
+def test_retrieval_graph_responds_to_user_on_medium_confidence() -> None:
+    retriever = FakeRetriever(
+        results=[
+            RetrievedChunk(
+                chunk_id="chunk-1",
+                text="Remote work abroad needs manager approval.",
+                metadata={"source_doc": "employee_handbook"},
+                score=0.5,
+                source="reranked",
+                scores={"rerank": 0.5},
+            )
+        ]
+    )
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    graph = build_retrieval_graph(
+        engine,
+        retriever=retriever,
+        answer_generator=fake_answer_generator,
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+    result = graph.invoke({"question": "Can I work from abroad?"})
+
+    assert result["confidence_label"] == "medium"
+    assert graph.visited[-1] == "respond_to_user"
+    assert result["final_response"]["escalated"] is False
+
+
+def test_retrieval_graph_escalates_to_hr_on_low_confidence() -> None:
+    retriever = FakeRetriever(
+        results=[
+            RetrievedChunk(
+                chunk_id="chunk-1",
+                text="Grievances are handled case by case.",
+                metadata={
+                    "source_doc": "employee_handbook",
+                    "source_file": "employee_handbook_v2.1.md",
+                },
+                score=0.2,
+                source="reranked",
+                scores={"rerank": 0.2},
+            )
+        ]
+    )
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    graph = build_retrieval_graph(
+        engine,
+        retriever=retriever,
+        answer_generator=fake_answer_generator,
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+    result = graph.invoke(
+        {
+            "question": "How do I raise a grievance against my manager?",
+            "employee_context": {"employee_country": "Estonia"},
+        }
+    )
+
+    assert result["confidence_label"] == "low"
+    assert graph.visited[-1] == "escalate_to_hr"
+    assert "respond_to_user" not in graph.visited
+    assert result["final_response"] == {
+        "text": ESCALATION_MESSAGE,
+        "sources": [],
+        "escalated": True,
+    }
+    assert result["escalation"] == {
+        "reason": "low_confidence",
+        "contact": HR_CONTACT_EMAIL,
+        "question": "How do I raise a grievance against my manager?",
+        "employee_context": {"employee_country": "Estonia"},
+        "confidence_score": 0.24,
+        "confidence_label": "low",
+        "draft_answer": "Grievances are handled case by case.",
+        "candidate_sources": result["generated_answer"]["sources"],
+    }
+
+
+def test_retrieval_graph_escalates_when_no_documents_found() -> None:
+    retriever = FakeRetriever(results=[])
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    graph = build_retrieval_graph(
+        engine,
+        retriever=retriever,
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+    result = graph.invoke({"question": "Can I bring my dog to the Porto office?"})
+
+    assert graph.visited[-1] == "escalate_to_hr"
+    assert result["escalation"]["reason"] == "no_documents_found"
+    assert result["escalation"]["candidate_sources"] == []
+    assert result["final_response"]["escalated"] is True

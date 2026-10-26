@@ -14,9 +14,11 @@ from retrieval import (
 )
 
 from .answering import generate_grounded_answer
+from .escalation import ESCALATION_MESSAGE, build_hr_escalation
 from .state import (
     AnswerSource,
     EmployeeContext,
+    FinalResponse,
     GeneratedAnswer,
     RetrievalConfig,
     RetrievalDebug,
@@ -29,6 +31,7 @@ DEFAULT_COUNTRY_KEYS = (
     "office_country",
 )
 MAX_ANSWER_SOURCES = 3
+ESCALATE_CONFIDENCE_LABELS = frozenset({"low"})
 
 
 def build_retrieval_graph(
@@ -64,11 +67,19 @@ def build_retrieval_graph(
         _make_generate_answer_node(answer_generator=answer_generator or generate_grounded_answer),
     )
     graph.add_node("score_confidence", _score_confidence_node)
+    graph.add_node("respond_to_user", _respond_to_user_node)
+    graph.add_node("escalate_to_hr", _escalate_to_hr_node)
     graph.add_edge(start_token, "resolve_filters")
     graph.add_edge("resolve_filters", "retrieve_documents")
     graph.add_edge("retrieve_documents", "generate_answer")
     graph.add_edge("generate_answer", "score_confidence")
-    graph.add_edge("score_confidence", end_token)
+    graph.add_conditional_edges(
+        "score_confidence",
+        _route_after_confidence,
+        {"respond_to_user": "respond_to_user", "escalate_to_hr": "escalate_to_hr"},
+    )
+    graph.add_edge("respond_to_user", end_token)
+    graph.add_edge("escalate_to_hr", end_token)
     return graph.compile()
 
 
@@ -238,6 +249,34 @@ def _calculate_confidence_score(
         score += 0.04
 
     return round(min(score, 0.97), 3)
+
+
+def _route_after_confidence(state: RetrievalState) -> str:
+    if state.get("confidence_label", "low") in ESCALATE_CONFIDENCE_LABELS:
+        return "escalate_to_hr"
+    return "respond_to_user"
+
+
+def _respond_to_user_node(state: RetrievalState) -> dict[str, Any]:
+    generated_answer = state.get("generated_answer", {"text": "", "sources": []})
+    response: FinalResponse = {
+        "text": generated_answer.get("text", ""),
+        "sources": generated_answer.get("sources", []),
+        "escalated": False,
+    }
+    return {"final_response": response}
+
+
+def _escalate_to_hr_node(state: RetrievalState) -> dict[str, Any]:
+    response: FinalResponse = {
+        "text": ESCALATION_MESSAGE,
+        "sources": [],
+        "escalated": True,
+    }
+    return {
+        "escalation": build_hr_escalation(state),
+        "final_response": response,
+    }
 
 
 def _confidence_label(score: float) -> str:
