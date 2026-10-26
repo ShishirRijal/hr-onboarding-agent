@@ -173,11 +173,13 @@ PYTHONPATH=. poetry run python scripts/ingest.py
 PYTHONPATH=. poetry run uvicorn api.main:app --port 8010
 ```
 
-- `POST /chat` answers a question: `{"message": "...", "session_id": "...", "employee_context": {"employee_country": "Estonia"}}`
+- `POST /chat/stream` answers a question as server-sent events: `status` updates while it searches, `token` events as the answer is written, then `done` with the full answer and sources
+- `POST /chat` answers in one response: `{"message": "...", "session_id": "...", "employee_context": {"employee_country": "Estonia"}}`
+- `POST /interactions/{interaction_id}/hr-request` records whether the employee wants an unanswered question sent to HR: `{"ask_hr": true}`
 - `GET /sessions/{session_id}/messages` returns a chat's history
 - `GET /health`
 
-Every question and answer is logged to `data/interactions.db`; escalated questions are the rows with `escalated = 1`.
+Every question is logged to `data/interactions.db`. Questions the documents can't answer have `answered = 0` and `escalation_status` set to `offered`, then `requested` or `declined` once the employee chooses; the ones sent to HR also have `escalated = 1`.
 
 **3. Start the web app** (port 3000)
 
@@ -189,7 +191,7 @@ npm run dev
 
 Open http://localhost:3000. The web app proxies `/api/*` to the API; set `HR_API_URL` if the API runs somewhere other than `http://localhost:8010`.
 
-High- and medium-confidence answers are shown with their sources. Low-confidence questions, and questions the documents don't cover, are logged for HR and the employee is told so.
+Answers stream in with their sources. When the documents don't cover a question, the assistant says so and asks whether to send it to HR; nothing goes to HR unless the employee says yes.
 
 ### Command line
 

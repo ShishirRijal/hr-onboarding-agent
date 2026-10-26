@@ -20,6 +20,10 @@ export function documentTitle(source: Source): string {
   return source.source_file ?? source.source_doc ?? "HR document";
 }
 
+export function documentTitleById(sourceDoc: string): string {
+  return DOCUMENT_TITLES[sourceDoc] ?? sourceDoc;
+}
+
 // Section paths start with the document's own H1 ("NordTech Solutions — Leave & Absence
 // Policy > 3. Finland — Leave & Absence"); the document title is shown separately.
 export function sectionLabel(source: Source): string | null {
