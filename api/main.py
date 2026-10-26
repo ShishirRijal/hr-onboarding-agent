@@ -79,7 +79,8 @@ def create_app(*, graph: Any | None = None, store: Any | None = None) -> FastAPI
         return StreamingResponse(
             events(),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            # no-transform stops compressing proxies (including Next's gzip) from buffering the stream.
+            headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
         )
 
     @app.post("/interactions/{interaction_id}/hr-request", response_model=HRRequestResponse)
