@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+/* Baltic light: cool paper, deep sea ink, one warm colour reserved for "sent to HR". */
+@theme {
+  --color-ice: #f3f6f8;
+  --color-paper: #ffffff;
+  --color-ink: #1c2b36;
+  --color-ink-soft: #4e6070;
+  --color-ink-faint: #8495a3;
+  --color-birch: #d9e1e7;
+  --color-baltic: #2e5e7e;
+  --color-baltic-deep: #234a64;
+  --color-baltic-wash: #e4edf3;
+  --color-lamp: #8a5a12;
+  --color-lamp-line: #b7791f;
+  --color-lamp-wash: #fbf3e2;
+  --color-alert: #a33a2c;
+  --color-alert-wash: #fbecea;
+}
+
+@theme inline {
+  --font-sans: var(--font-familjen), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-source-serif), ui-serif, Georgia, serif;
+}
+
+html,
+body {
+  background: var(--color-ice);
+  color: var(--color-ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-baltic);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Assistant answers read like the policy documents they come from. */
+.answer {
+  font-family: var(--font-serif);
+  font-size: 1.0625rem;
+  line-height: 1.7;
+}
+
+.answer > * + * {
+  margin-top: 0.75em;
+}
+
+.answer ul,
+.answer ol {
+  padding-left: 1.25em;
+}
+
+.answer ul {
+  list-style: disc;
+}
+
+.answer ol {
+  list-style: decimal;
+}
+
+.answer li + li {
+  margin-top: 0.3em;
+}
+
+.answer strong {
+  font-weight: 600;
+}
+
+.answer a {
+  color: var(--color-baltic);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+@keyframes greet {
+  from {
+    opacity: 0;
+    transform: translateY(0.25em);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.greeting {
+  animation: greet 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.pending {
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .greeting,
+  .pending {
+    animation: none;
+  }
+}
