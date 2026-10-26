@@ -109,3 +109,59 @@ body {
     animation: none;
   }
 }
+
+/* The assistant's mark: three Baltic waves that keep flowing while it works. */
+@keyframes wave-flow {
+  to {
+    transform: translateX(-12px);
+  }
+}
+
+.mark-wave {
+  transform-box: view-box;
+}
+
+.mark.is-active .mark-wave {
+  animation: wave-flow 1.8s linear infinite;
+}
+
+.mark.is-active .mark-wave:nth-of-type(2) {
+  animation-duration: 1.3s;
+}
+
+.mark.is-active .mark-wave:nth-of-type(3) {
+  animation-duration: 2.3s;
+}
+
+/* The step currently in progress: a light sweep across the label. */
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(
+      90deg,
+      var(--color-ink-soft) 35%,
+      var(--color-baltic) 50%,
+      var(--color-ink-soft) 65%
+    )
+    0 0 / 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 1.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mark.is-active .mark-wave,
+  .shimmer {
+    animation: none;
+  }
+
+  .shimmer {
+    color: var(--color-ink-soft);
+    background: none;
+  }
+}

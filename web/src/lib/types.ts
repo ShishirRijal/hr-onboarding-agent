@@ -21,8 +21,24 @@ export type ChatResponse = {
   sources: Source[];
   confidence_score: number;
   confidence_label: string;
-  escalated: boolean;
+  answered: boolean;
+  escalation_status: HrStatus | null;
   escalation_reason: string | null;
+};
+
+// "offered": the documents had no answer and the employee was asked about HR.
+export type HrStatus = "offered" | "requested" | "declined";
+
+export type HrRequestResponse = {
+  interaction_id: string;
+  escalation_status: HrStatus;
+  message: string;
+};
+
+export type ProgressStep = {
+  stage: string;
+  label: string;
+  documents?: string[];
 };
 
 export type SessionMessage = {
@@ -33,7 +49,8 @@ export type SessionMessage = {
   sources: Source[];
   confidence_score: number;
   confidence_label: string;
-  escalated: boolean;
+  answered: boolean;
+  escalation_status: HrStatus | null;
   escalation_reason: string | null;
 };
 
@@ -43,11 +60,15 @@ export type AssistantMessage = {
   id: string;
   role: "assistant";
   question: string;
-  status: "pending" | "done" | "error";
+  // pending: working, no text yet; streaming: answer text is arriving.
+  status: "pending" | "streaming" | "done" | "error";
   text: string;
   sources: Source[];
-  confidenceLabel?: string;
-  escalated: boolean;
+  steps: ProgressStep[];
+  answered: boolean;
+  interactionId?: string;
+  hrStatus?: HrStatus | "sending";
+  hrMessage?: string;
 };
 
 export type ChatMessage = UserMessage | AssistantMessage;
