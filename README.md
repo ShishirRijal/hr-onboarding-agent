@@ -171,6 +171,8 @@ Ask the full retrieval + answer + confidence graph:
 PYTHONPATH=. poetry run python scripts/ask_agent.py "How much annual leave do I get in Estonia?" --employee-country Estonia
 ```
 
+High- and medium-confidence answers are returned to the employee with sources. Low-confidence questions are escalated: the employee is pointed to HR, and the script prints the escalation reason plus the draft answer that was withheld.
+
 Without Cohere reranking:
 
 ```bash
