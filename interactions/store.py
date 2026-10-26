@@ -6,15 +6,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, String, Text, create_engine, inspect, select, text
+from sqlalchemy import JSON, Boolean, DateTime, Float, String, Text, create_engine, inspect, select, text, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 DEFAULT_DATABASE_URL = "sqlite:///data/interactions.db"
 # escalation_status: None when answered; "offered" when the docs had no answer and the
-# employee was asked about HR; then "requested" or "declined" once they chose.
+# employee was asked about HR; then "requested" or "declined" once they chose, or
+# "dismissed" when they asked something else without choosing.
 HR_OFFERED = "offered"
 HR_REQUESTED = "requested"
 HR_DECLINED = "declined"
+HR_DISMISSED = "dismissed"
 
 
 class Base(DeclarativeBase):
@@ -78,6 +80,14 @@ class InteractionStore:
         )
 
         with self._sessions.begin() as session:
+            if interaction.session_id:
+                # Moving on without answering an HR offer counts as a no.
+                session.execute(
+                    update(Interaction)
+                    .where(Interaction.session_id == interaction.session_id)
+                    .where(Interaction.escalation_status == HR_OFFERED)
+                    .values(escalation_status=HR_DISMISSED)
+                )
             session.add(interaction)
         return interaction.id
 

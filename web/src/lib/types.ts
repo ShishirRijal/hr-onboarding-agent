@@ -38,7 +38,8 @@ export type ChatResponse = {
 };
 
 // "offered": the documents had no answer and the employee was asked about HR.
-export type HrStatus = "offered" | "requested" | "declined";
+// "dismissed": they asked something else without choosing, which counts as a no.
+export type HrStatus = "offered" | "requested" | "declined" | "dismissed";
 
 export type HrRequestResponse = {
   interaction_id: string;
