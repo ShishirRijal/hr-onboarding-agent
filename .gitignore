@@ -58,3 +58,6 @@ commit.md
 .langchain/
 
 plan/
+
+# Local interaction log (SQLite)
+data/

@@ -93,6 +93,7 @@ class FinalResponse(TypedDict):
 
 
 class RetrievalState(TypedDict, total=False):
+    session_id: str
     question: str
     employee_context: EmployeeContext
     retrieval_overrides: RetrievalOverrides
@@ -107,3 +108,4 @@ class RetrievalState(TypedDict, total=False):
     confidence_debug: ConfidenceDebug
     escalation: HREscalation
     final_response: FinalResponse
+    interaction_id: str
