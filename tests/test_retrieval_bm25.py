@@ -77,6 +77,19 @@ def test_bm25_search_applies_filters() -> None:
                 "chunk_index": "0.1",
             },
         ),
+        IngestedChunk(
+            text="Unused annual leave can be carried over up to 5 days.",
+            metadata={
+                "source_doc": "leave_policy",
+                "source_file": "leave_absence_policy.md",
+                "doc_type": "policy",
+                "category": "HR",
+                "country": "All",
+                "file_type": "markdown",
+                "section_path": "Leave > All Countries",
+                "chunk_index": "0.2",
+            },
+        ),
     ]
 
     index = build_bm25_index(chunks)
@@ -87,5 +100,5 @@ def test_bm25_search_applies_filters() -> None:
         filters=RetrievalFilters(country="Portugal"),
     )
 
-    assert len(results) == 1
-    assert results[0].metadata["country"] == "Portugal"
+    assert len(results) == 2
+    assert {result.metadata["country"] for result in results} == {"Portugal", "All"}

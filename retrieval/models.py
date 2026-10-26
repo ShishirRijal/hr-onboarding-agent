@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .settings import SHARED_COUNTRY
+
 
 @dataclass(slots=True)
 class RetrievedChunk:
@@ -43,7 +45,7 @@ class RetrievalFilters:
 
     def matches(self, metadata: dict[str, Any]) -> bool:
         for key, value in self.as_dict().items():
-            if str(metadata.get(key)) != value:
+            if str(metadata.get(key)) not in _accepted_values(key, value):
                 return False
         return True
 
@@ -51,11 +53,19 @@ class RetrievalFilters:
         if self.is_empty():
             return None
 
-        from qdrant_client.http.models import FieldCondition, Filter, MatchValue
+        from qdrant_client.http.models import FieldCondition, Filter, MatchAny, MatchValue
 
-        return Filter(
-            must=[
-                FieldCondition(key=key, match=MatchValue(value=value))
-                for key, value in self.as_dict().items()
-            ]
-        )
+        conditions = []
+        for key, value in self.as_dict().items():
+            values = _accepted_values(key, value)
+            match = MatchValue(value=values[0]) if len(values) == 1 else MatchAny(any=values)
+            conditions.append(FieldCondition(key=key, match=match))
+
+        return Filter(must=conditions)
+
+
+def _accepted_values(key: str, value: str) -> list[str]:
+    # Company-wide chunks apply to every country, so a country filter must keep them.
+    if key == "country" and value != SHARED_COUNTRY:
+        return [value, SHARED_COUNTRY]
+    return [value]
