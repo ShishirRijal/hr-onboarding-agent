@@ -93,10 +93,10 @@ export function SourcePanel({ source, onClose }: { source: Source; onClose: () =
         aria-label="Close source"
         onClick={onClose}
       />
-      <aside className="source-panel relative flex h-full w-full max-w-[36rem] flex-col border-l border-birch bg-paper shadow-xl lg:w-[30rem] lg:shadow-none xl:w-[36rem]">
-        <header className="flex items-start gap-3 border-b border-birch px-5 py-4">
+      <aside className="source-panel relative flex h-full w-full max-w-[36rem] flex-col border-l border-line bg-surface shadow-xl lg:w-[30rem] lg:shadow-none xl:w-[36rem]">
+        <header className="flex items-start gap-3 border-b border-line px-5 py-4">
           <div className="min-w-0 flex-1">
-            <h2 ref={headingRef} tabIndex={-1} className="truncate font-semibold text-ink">
+            <h2 ref={headingRef} tabIndex={-1} className="truncate text-lg font-bold text-ink">
               {title}
             </h2>
             {section && <p className="truncate text-sm text-ink-soft">{section}</p>}
@@ -104,9 +104,9 @@ export function SourcePanel({ source, onClose }: { source: Source; onClose: () =
               <button
                 type="button"
                 onClick={() => scrollToCited(bodyRef.current, true)}
-                className="mt-2 flex items-center gap-2 text-sm text-baltic hover:text-baltic-deep"
+                className="mt-2 flex items-center gap-2 text-sm font-semibold text-brand hover:text-brand-deep"
               >
-                <span className="h-3.5 w-[3px] rounded-full bg-baltic" aria-hidden="true" />
+                <span className="h-3.5 w-[3px] rounded-full bg-brand-bright" aria-hidden="true" />
                 Show the part used for this answer
               </button>
             )}
@@ -114,7 +114,7 @@ export function SourcePanel({ source, onClose }: { source: Source; onClose: () =
           <button
             type="button"
             onClick={onClose}
-            className="-mr-1.5 rounded-md p-1.5 text-ink-soft hover:bg-ice"
+            className="-mr-1.5 rounded-full p-1.5 text-ink-soft hover:bg-muted"
             aria-label="Close source"
           >
             <CloseIcon className="size-5" />
