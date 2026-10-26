@@ -49,7 +49,10 @@ Pension arrangements differ by country due to local statutory requirements. Empl
 
 ## 5. Home Office Setup
 
-- Remote employees are eligible for a **one-time home office setup budget of €500**, covering items like a desk, chair, monitor, or other ergonomic equipment.
+- **Fully remote employees** — those with an individually agreed fully remote arrangement (see the Employee Handbook, Section 7) — are eligible for a **one-time home office setup budget of €500**.
+- The budget covers **furniture and ergonomic items**: a desk (including a standing desk), an office chair, a desk lamp, a footrest, or similar.
+- Monitors, keyboards, headsets, and other tech peripherals are **not** part of this budget. Order those through IT's €300 peripherals budget instead (see the IT Setup Guide, Section 7).
+- Hybrid employees (working up to 3 days per week from home by default) are not eligible, since they have a fully equipped office desk.
 - This benefit becomes available **after 6 months** of employment, to avoid duplicating costs for employees who leave shortly after joining.
 - Requests are submitted via Expensify under the "Home Office" category and require manager approval, consistent with other budget-capped benefits in this guide.
 

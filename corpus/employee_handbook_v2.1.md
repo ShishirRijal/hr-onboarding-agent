@@ -99,7 +99,7 @@ Serious violations (e.g., harassment, fraud, gross misconduct) may bypass earlie
 **Section: Termination Policy**
 
 - Termination can occur voluntarily (resignation) or involuntarily (dismissal, redundancy, or end of a disciplinary process).
-- Notice periods are governed by local labour law in the employee's country of employment (Estonia, Finland, or Portugal) and by the terms of the individual's employment contract — this handbook does not override statutory minimums.
+- Notice periods are governed by local labour law in the employee's country of employment (Estonia, Finland, or Portugal) and by the terms of the individual's employment contract — this handbook does not override statutory minimums. Probation and resignation notice periods for each country are summarised in the Working Hours & Payroll Policy.
 - Employees who resign should provide notice in writing to their manager and HR, following the notice period specified in their contract.
 - Upon termination, IT will deactivate company accounts and collect company equipment (see the IT Setup Guide for the systems affected); HR will process final payroll and any applicable severance in line with local law.
 - This handbook does not cover redundancy-specific questions such as treatment of unvested stock options — those are addressed on a case-by-case basis by HR and Finance.
@@ -113,8 +113,8 @@ Serious violations (e.g., harassment, fraud, gross misconduct) may bypass earlie
 - Employees may work **up to 3 days per week from home** by default, with the remaining days expected in their assigned office.
 - Employees may work **fully remotely** if agreed individually with their manager — this is assessed based on role requirements, team needs, and individual circumstances, rather than being a blanket entitlement.
 - Remote work does not change an employee's registered country of employment for payroll, tax, or benefits purposes; working from a different country for an extended period requires prior approval (see Section 8 for the data protection implications, and note that this handbook does not fully resolve extended cross-border remote work — check with HR before making plans).
-- Employees working remotely are still expected to be reachable during their core working hours and to attend key meetings (team standups, the Monday company sync) as though they were in the office.
-- Full remote-work eligibility does not affect the home office setup benefit described in the Benefits & Perks Guide, which is available to eligible remote employees after 6 months of employment.
+- Employees working remotely are still expected to be reachable during core working hours (10:00–15:00 local time, see the Working Hours & Payroll Policy) and to attend key meetings (team standups, the Monday company sync) as though they were in the office.
+- Employees with an agreed fully remote arrangement become eligible for the one-time €500 home office setup budget after 6 months of employment (see the Benefits & Perks Guide, Section 5). Hybrid employees are not eligible.
 
 ---
 
@@ -148,4 +148,4 @@ Full detail on what personal data NordTech collects, retention periods, and empl
 
 This handbook is intentionally a summary of company-wide norms and policies. For anything not covered here — including compensation specifics, individual contract terms, or edge cases not addressed by this or other policy documents — reach out to your manager or HR (hr@nordtech.ee) directly rather than assuming a default answer.
 
-*Related documents: Leave & Absence Policy, Expense & Reimbursement Policy, Benefits & Perks Guide, IT Setup Guide, Onboarding Checklist, GDPR Employee Data Policy, EU AI Act Compliance Summary, Org Chart & Team Directory.*
+*Related documents: Leave & Absence Policy, Working Hours & Payroll Policy, Expense & Reimbursement Policy, Benefits & Perks Guide, IT Setup Guide, Onboarding Checklist, GDPR Employee Data Policy, EU AI Act Compliance Summary, Org Chart & Team Directory.*

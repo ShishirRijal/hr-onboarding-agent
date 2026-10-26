@@ -82,6 +82,8 @@ Employees may order additional peripherals (monitor, keyboard, mouse, headset, d
 
 Requests exceeding the €300 budget require additional approval from your manager and Ott Rebane (Finance Manager) — see the Org Chart for contact details.
 
+This budget covers tech peripherals only. Furniture such as desks and chairs is not ordered through IT — fully remote employees can use the separate €500 home office setup budget for that (see the Benefits & Perks Guide, Section 5).
+
 ---
 
 *Related documents: for reimbursable expenses outside of standard IT equipment (e.g., home office furniture), see the Expense & Reimbursement Policy and the Benefits & Perks Guide. For the onboarding timeline in which this guide is used, see the Onboarding Checklist (30/60/90 Day).*

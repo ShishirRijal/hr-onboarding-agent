@@ -49,7 +49,7 @@ This policy covers business-related expenses incurred by NordTech employees whil
 
 1. Submit all expenses via **Expensify within 30 days** of the expense being incurred. Expenses submitted after 30 days may be rejected at manager discretion.
 2. Your manager reviews and approves the expense report in Expensify.
-3. Approved expenses are **reimbursed with the next salary cycle**, paid on the **15th of the month**. If an expense is approved after the cutoff for that month's payroll run, it rolls to the following month's cycle.
+3. Approved expenses are **reimbursed with the next salary cycle**, paid on the **15th of the month**. If an expense is approved after the payroll cutoff on the **5th of the month**, it rolls to the following month's cycle (see the Working Hours & Payroll Policy).
 
 ## 7. What Is Not Covered
 
@@ -60,7 +60,9 @@ The following are **not reimbursable** under this policy:
 - **Gym or wellness expenses** — these are covered separately under the monthly wellness budget in the Benefits & Perks Guide, not through this policy.
 - **Flight or hotel upgrades** beyond what is described in Sections 3 and 4 (e.g., seat upgrades, hotel room upgrades) without prior manager approval.
 
-Items not explicitly listed in this policy (for example, home office furniture such as a standing desk) are **not automatically covered**. If you're unsure whether something qualifies, check with your manager or HR before purchasing — do not assume reimbursement.
+**Home office furniture** (for example, a standing desk or office chair) is not reimbursable under this policy. Fully remote employees can claim it from the one-time €500 home office setup budget after 6 months of employment (see the Benefits & Perks Guide, Section 5); monitors and other tech peripherals go through IT's €300 peripherals budget (see the IT Setup Guide, Section 7).
+
+Other items not explicitly listed in this policy are **not automatically covered**. If you're unsure whether something qualifies, check with your manager or HR before purchasing — do not assume reimbursement.
 
 ## 8. Client Entertainment
 

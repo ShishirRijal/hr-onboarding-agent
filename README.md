@@ -121,12 +121,14 @@ The knowledge base lives in `corpus/` and includes:
 - Onboarding Checklist
 - IT Setup Guide
 - Leave & Absence Policy
+- Working Hours & Payroll Policy
 - Benefits & Perks Guide
 - Expense & Reimbursement Policy
 - Org Chart & Team Directory
 - GDPR Employee Data Policy
 - EU AI Act Compliance Summary
-- HR FAQ Log
+
+`corpus/hr_faq_log.csv` is the HR FAQ Log. It is not ingested: it is kept as a held-out evaluation set of employee questions with expected answers and source documents, including questions the corpus deliberately cannot answer (`source_doc: NONE`), which the agent should escalate.
 
 Project documentation lives in `docs/` and is reserved for architecture notes, ingestion and retrieval design, and ADRs.
 
