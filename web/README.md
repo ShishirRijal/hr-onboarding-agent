@@ -11,11 +11,16 @@ The app calls `/api/*`, which `next.config.ts` proxies to the FastAPI backend (`
 
 ## Structure
 
-- `src/app/page.tsx` — new chat
-- `src/app/c/[sessionId]/page.tsx` — an existing chat; history is loaded from the API
-- `src/components/` — sidebar, chat view, messages and sources, composer
-- `src/lib/api.ts` — API client
-- `src/lib/app-state.tsx` — session list and office, stored in the browser until there is login
+- `src/app/sign-in/page.tsx` — sign-in; everything else needs a signed-in session
+- `src/app/(employee)/page.tsx` — new chat
+- `src/app/(employee)/c/[sessionId]/page.tsx` — an existing chat; history is loaded from the API
+- `src/app/(employee)/profile/page.tsx` — the signed-in employee's profile
+- `src/app/hr/` — the HR platform, for the HR team only: inbox with overview, one question with the answer form, and answered questions
+- `src/proxy.ts` — sends visitors without a session cookie to sign-in; the API checks the session itself
+- `src/components/` — app shell and sidebars, chat view, messages and sources, composer, HR inbox and question views
+- `src/lib/api.ts` — API client; a `401` from the API goes to sign-in
+- `src/lib/session.tsx` — the signed-in user, loaded once per area
+- `src/lib/app-state.tsx` — the user's chat list from the API, refreshed on focus and every minute so HR replies show up
 
 ## Design
 

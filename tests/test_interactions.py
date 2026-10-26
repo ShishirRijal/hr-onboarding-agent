@@ -127,6 +127,51 @@ def test_store_adds_new_columns_to_an_existing_database(tmp_path: Path) -> None:
         )
 
     store = InteractionStore(f"sqlite:///{database}")
-    interaction_id = store.log(_state("Can I bring my dog?", session_id="s-1", answered=False))
+    interaction_id = store.log({**_state("Can I bring my dog?", session_id="s-1", answered=False), "user_id": "u-1"})
 
     assert store.get(interaction_id).escalation_status == "offered"
+    assert store.get(interaction_id).user_id == "u-1"
+    assert store.get(interaction_id).hr_answer is None
+
+
+def test_hr_answer_is_recorded_once_and_left_out_of_the_digest(tmp_path: Path) -> None:
+    store = InteractionStore(f"sqlite:///{tmp_path / 'interactions.db'}")
+    asked_id = store.log({**_state("Can I bring my dog?", session_id="s-1", answered=False), "user_id": "u-1"})
+    store.record_hr_choice(asked_id, ask_hr=True, name="A", email="a@nordtech.test")
+
+    answered = store.record_hr_answer(
+        asked_id, answer="Fridays only.", answered_by="Marju Ilves", answered_by_id="hr-1", country="All", chunk_id="c-1"
+    )
+
+    assert answered.escalation_status == "answered"
+    assert answered.hr_answered_at is not None
+    assert [item.id for item in store.hr_questions("answered")] == [asked_id]
+    assert store.hr_questions("requested") == []
+    assert store.pending_hr_requests() == []
+    with pytest.raises(ValueError):
+        store.record_hr_answer(
+            asked_id, answer="Again.", answered_by="Marju Ilves", answered_by_id="hr-1", country="All", chunk_id=None
+        )
+
+
+def test_users_chats_are_listed_newest_first_with_unread_hr_replies(tmp_path: Path) -> None:
+    store = InteractionStore(f"sqlite:///{tmp_path / 'interactions.db'}")
+    first_id = store.log({**_state("Can I bring my dog?", session_id="s-1", answered=False), "user_id": "u-1"})
+    store.log({**_state("How much leave?", session_id="s-2", answered=True), "user_id": "u-1"})
+    store.log({**_state("Someone else's chat", session_id="s-3", answered=True), "user_id": "u-2"})
+    store.record_hr_choice(first_id, ask_hr=True)
+    store.record_hr_answer(
+        first_id, answer="Fridays only.", answered_by="Marju Ilves", answered_by_id="hr-1", country="All", chunk_id=None
+    )
+
+    # The HR reply is newer than the other chat, so its chat moves to the top.
+    chats = store.list_user_sessions("u-1")
+    assert [(chat.session_id, chat.title, chat.unread_hr_replies) for chat in chats] == [
+        ("s-1", "Can I bring my dog?", 1),
+        ("s-2", "How much leave?", 0),
+    ]
+    assert store.session_owners("s-1") == {"u-1"}
+    assert store.session_owners("new") == set()
+
+    store.mark_hr_answers_read("s-1")
+    assert store.list_user_sessions("u-1")[0].unread_hr_replies == 0

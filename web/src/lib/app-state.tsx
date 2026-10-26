@@ -1,71 +1,82 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { DEFAULT_OFFICE, findOffice, type Office } from "./offices";
-import type { SessionSummary } from "./types";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { fetchSessions } from "./api";
+import type { ChatSessionSummary, SessionSummary } from "./types";
 
-// Until there is login, the session list and office live in this browser only.
-// Message history itself is stored by the API, keyed by session id.
-const SESSIONS_KEY = "nordtech-hr.sessions";
-const OFFICE_KEY = "nordtech-hr.office";
-const MAX_SESSIONS = 50;
+// The chat list comes from the API, so it follows the user to any browser. It is checked
+// again when the window regains focus and every minute, which is how replies from HR show up.
+const REFRESH_MS = 60_000;
 
 type AppState = {
   sessions: SessionSummary[];
-  office: Office;
-  setOffice: (officeId: string) => void;
+  sessionsLoaded: boolean;
+  refreshSessions: () => void;
   activeSessionId: string | null;
   setActiveSessionId: (sessionId: string | null) => void;
   saveSession: (session: SessionSummary) => void;
+  markSessionRead: (sessionId: string) => void;
   newChatKey: number;
   resetNewChat: () => void;
 };
 
 const AppStateContext = createContext<AppState | null>(null);
 
-function readStorage<T>(key: string, fallback: T): T {
-  try {
-    const raw = window.localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeStorage(key: string, value: unknown) {
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Storage can be unavailable (private mode); the app still works for this visit.
-  }
+function fromApi(session: ChatSessionSummary): SessionSummary {
+  return {
+    id: session.session_id,
+    title: session.title,
+    updatedAt: Date.parse(session.updated_at),
+    unread: session.unread_hr_replies,
+  };
 }
 
 export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [office, setOfficeState] = useState<Office>(DEFAULT_OFFICE);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [newChatKey, setNewChatKey] = useState(0);
+  // Chats started here whose first answer the API hasn't stored yet.
+  const unsaved = useRef(new Map<string, SessionSummary>());
+
+  const refreshSessions = useCallback(() => {
+    fetchSessions()
+      .then((list) => {
+        const stored = list.map(fromApi);
+        const storedIds = new Set(stored.map((session) => session.id));
+        for (const id of storedIds) unsaved.current.delete(id);
+        const merged = [...unsaved.current.values(), ...stored].sort((a, b) => b.updatedAt - a.updatedAt);
+        setSessions(merged);
+        setSessionsLoaded(true);
+      })
+      .catch(() => setSessionsLoaded(true));
+  }, []);
 
   useEffect(() => {
-    // Hydrate from browser storage after mount so server and client render the same markup.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSessions(readStorage<SessionSummary[]>(SESSIONS_KEY, []));
-    setOfficeState(findOffice(readStorage<string | null>(OFFICE_KEY, null)));
-  }, []);
-
-  const setOffice = useCallback((officeId: string) => {
-    setOfficeState(findOffice(officeId));
-    writeStorage(OFFICE_KEY, officeId);
-  }, []);
+    refreshSessions();
+    const timer = setInterval(refreshSessions, REFRESH_MS);
+    window.addEventListener("focus", refreshSessions);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", refreshSessions);
+    };
+  }, [refreshSessions]);
 
   const saveSession = useCallback((session: SessionSummary) => {
     setSessions((current) => {
       const existing = current.find((item) => item.id === session.id);
+      if (!existing) unsaved.current.set(session.id, session);
       const merged = existing ? { ...existing, updatedAt: session.updatedAt } : session;
-      const next = [merged, ...current.filter((item) => item.id !== session.id)].slice(0, MAX_SESSIONS);
-      writeStorage(SESSIONS_KEY, next);
-      return next;
+      return [merged, ...current.filter((item) => item.id !== session.id)];
     });
+  }, []);
+
+  const markSessionRead = useCallback((sessionId: string) => {
+    setSessions((current) =>
+      current.some((item) => item.id === sessionId && item.unread > 0)
+        ? current.map((item) => (item.id === sessionId ? { ...item, unread: 0 } : item))
+        : current,
+    );
   }, []);
 
   const resetNewChat = useCallback(() => setNewChatKey((key) => key + 1), []);
@@ -73,15 +84,16 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo(
     () => ({
       sessions,
-      office,
-      setOffice,
+      sessionsLoaded,
+      refreshSessions,
       activeSessionId,
       setActiveSessionId,
       saveSession,
+      markSessionRead,
       newChatKey,
       resetNewChat,
     }),
-    [sessions, office, setOffice, activeSessionId, saveSession, newChatKey, resetNewChat],
+    [sessions, sessionsLoaded, refreshSessions, activeSessionId, saveSession, markSessionRead, newChatKey, resetNewChat],
   );
 
   return <AppStateContext value={value}>{children}</AppStateContext>;

@@ -9,8 +9,8 @@ NOT_FOUND_MESSAGE = (
 )
 def hr_request_sent_message(email: str) -> str:
     return (
-        "Your question goes to the HR team in their end-of-day summary, "
-        f"and they'll reply to {email}. If it's urgent, email {HR_CONTACT_EMAIL}."
+        "Your question is with the HR team. Their answer will appear in this chat, "
+        f"and they may also reply to {email}. If it's urgent, email {HR_CONTACT_EMAIL}."
     )
 HR_REQUEST_DECLINED_MESSAGE = "Okay, I won't send it to HR."
 

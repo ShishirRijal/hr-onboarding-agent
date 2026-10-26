@@ -32,6 +32,10 @@ class PassageLibrary:
         self._corpus_dir = corpus_dir.resolve()
         self._documents: dict[str, str | None] = {}
 
+    def add(self, chunk: IngestedChunk) -> None:
+        """Makes a chunk added while the API runs (like an HR answer) openable as a source."""
+        self._chunks[stable_chunk_id(chunk.metadata)] = chunk
+
     def passage(self, chunk_id: str) -> Passage | None:
         chunk = self._chunks.get(chunk_id)
         if chunk is None:

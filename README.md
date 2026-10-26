@@ -60,7 +60,7 @@ The agent is built around five tools:
    - Routes the query to a human HR contact rather than letting the model invent an answer.
    - Handles sensitive or edge-case questions such as grievances, legal ambiguity, or anything outside the policy set.
    - Formats the question and context into a structured handoff so HR can review it quickly.
-   - Asks the employee first, and only sends questions they agree to; those reach HR in one email at the end of the day, with who asked so HR can reply.
+   - Asks the employee first, and only sends questions they agree to; those wait in the HR inbox and reach HR in one email at the end of the day, with who asked. HR's answer goes back to the employee's chat and into the knowledge base.
    - This is the system's safety valve and the main human-in-the-loop path.
 
 4. `Interaction Logger`
@@ -156,7 +156,7 @@ The build order is also intentional: document ingestion comes first, then retrie
 - FastAPI for the API
 - Next.js (React, TypeScript, Tailwind CSS) for the web app
 - APScheduler for weekly digests
-- SQLite and SQLAlchemy for interaction logging
+- SQLite and SQLAlchemy for interaction logging, accounts and sign-in sessions
 
 ## Run It Locally
 
@@ -185,18 +185,31 @@ Mailpit catches the HR digest email locally, so nothing real is sent; its inbox 
 PYTHONPATH=. poetry run uvicorn api.main:app --port 8010
 ```
 
+On first start, with no accounts in the database, the API adds the [demo accounts](#demo-accounts). `scripts/seed_users.py` does the same on demand and adds any that are missing.
+
+Every route except `GET /health` and `POST /auth/sign-in` needs a signed-in session, and answers `401` without one.
+
+- `POST /auth/sign-in` checks `{"email": "...", "password": "..."}` and sets the session cookie; `POST /auth/sign-out` ends the session; `GET /auth/me` returns the signed-in user's profile
 - `POST /chat/stream` answers a question as server-sent events: `status` updates while it searches, `token` events as the answer is written, then `done` with the full answer and sources
-- `POST /chat` answers in one response: `{"message": "...", "session_id": "...", "employee_context": {"employee_country": "Estonia"}}`
+- `POST /chat` answers in one response: `{"message": "...", "session_id": "..."}`. Where the employee works (country, office, department, role) comes from their account, not the request
 - `POST /interactions/{interaction_id}/hr-request` records whether the employee wants an unanswered question sent to HR: `{"ask_hr": true}`
-- `GET /sessions/{session_id}/messages` returns a chat's history
+- `GET /sessions` lists the signed-in user's chats, newest first, with the number of unread HR replies in each
+- `GET /sessions/{session_id}/messages` returns one of the user's chats, including HR's replies, and marks those replies as read. Other users' chats answer `404`
 - `GET /sources/{chunk_id}` returns the source document of a cited chunk with the chunk's character span, so the UI can open it with that part highlighted
 - `GET /health`
 
-Every question is logged to `data/interactions.db`. Questions the documents can't answer have `answered = 0` and `escalation_status` set to `offered`, then `requested` or `declined` once the employee chooses, or `dismissed` if they ask something else without choosing; the ones sent to HR also have `escalated = 1`.
+HR team only (`403` for employees):
 
-Declined and dismissed questions stay anonymous. Questions sent to HR also store who asked (`employee_name`, `employee_email`) so HR can reply; until there is sign-in, that is a placeholder `Employee <employee@nordtech.test>`, set in `api/main.py`.
+- `GET /hr/overview`: open questions, questions answered this week, and the most common unanswered topics of the last 30 days
+- `GET /hr/questions?status=requested|answered`: questions sent to HR, with who asked
+- `GET /hr/questions/{interaction_id}`: one question with why the assistant couldn't answer, the documents it checked, and the earlier turns of the chat
+- `POST /hr/questions/{interaction_id}/answer`: `{"answer": "...", "applies_to": "country" | "everyone"}` sends HR's answer to the employee and adds it to the knowledge base
 
-**HR digest email.** Once a day at `HR_DIGEST_TIME` (default 18:00, `Europe/Tallinn`) the API emails `HR_DIGEST_TO` every question sent to HR since the last digest: the question, who asked and their email, where they work, why the assistant couldn't answer, and which documents it checked. Nothing is sent on days without new questions. Each question is marked with `hr_notified_at` once the email is accepted, so a failed send is retried next time and nothing is sent twice. SMTP settings are in `.env.example`; set `HR_DIGEST_TIME=` (empty) to turn it off. To send it now, or from cron instead:
+Every question is logged to `data/interactions.db` with the user who asked (`user_id`). Questions the documents can't answer have `answered = 0` and `escalation_status` set to `offered`, then `requested` or `declined` once the employee chooses, or `dismissed` if they ask something else without choosing; the ones sent to HR also have `escalated = 1`, and become `answered` when HR replies from the HR inbox (`hr_answer`, `hr_answered_by`, `hr_answered_at`).
+
+Declined and dismissed questions stay anonymous. Questions sent to HR also store who asked (`employee_name`, `employee_email`), taken from the signed-in account, so HR can reply.
+
+**HR digest email.** Once a day at `HR_DIGEST_TIME` (default 18:00, `Europe/Tallinn`) the API emails `HR_DIGEST_TO` every question sent to HR since the last digest: the question, who asked and their email, where they work, why the assistant couldn't answer, which documents it checked, and a link to answer it in the HR inbox (`HR_INBOX_URL`). Questions HR already answered in the inbox are left out. Nothing is sent on days without new questions. Each question is marked with `hr_notified_at` once the email is accepted, so a failed send is retried next time and nothing is sent twice. SMTP settings are in `.env.example`; set `HR_DIGEST_TIME=` (empty) to turn it off. To send it now, or from cron instead:
 
 ```bash
 PYTHONPATH=. poetry run python scripts/send_hr_digest.py            # send now
@@ -211,9 +224,42 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. The web app proxies `/api/*` to the API; set `HR_API_URL` if the API runs somewhere other than `http://localhost:8010`.
+Open http://localhost:3000 and sign in with one of the [demo accounts](#demo-accounts). The web app proxies `/api/*` to the API; set `HR_API_URL` if the API runs somewhere other than `http://localhost:8010`.
 
-Answers stream in with their sources. When the documents don't cover a question, the assistant says so and asks whether to send it to HR; nothing goes to HR unless the employee says yes.
+Answers stream in with their sources. When the documents don't cover a question, the assistant says so and asks whether to send it to HR; nothing goes to HR unless the employee says yes. HR's answer appears in that chat, and the chat is marked in the sidebar until the employee opens it. The profile page shows the employee's details as the assistant sees them.
+
+### Sign-in
+
+Nobody can use the app or the API without signing in. Accounts live in the same SQLite database as the interactions (`users` table), with passwords hashed with scrypt and a per-user salt. Signing in creates a row in `auth_sessions` and sets an HttpOnly, SameSite=Lax cookie holding a random token; only a hash of the token is stored, and signing out deletes the row, so the cookie stops working everywhere. Sessions last 7 days. The web app reaches the API through its own `/api` proxy, so the cookie is first-party. Set `SESSION_COOKIE_SECURE=true` when serving over HTTPS.
+
+There are two roles: `employee` uses the chat, `hr` also has the HR platform. After signing in, HR lands in the HR inbox and employees in the chat.
+
+### Demo accounts
+
+All demo accounts share the password `nordtech-demo`. **It is for local demos only**: change or remove these accounts anywhere else. Everyone is fictional; all addresses use the `nordtech.test` domain.
+
+| Role | Name | Email | Job title | Office | Started | Pronouns |
+|---|---|---|---|---|---|---|
+| HR | Marju Ilves | marju.ilves@nordtech.test | HR Business Partner | Tallinn, Estonia | Feb 2021 | she/her |
+| Employee | Kertu Vaher | kertu.vaher@nordtech.test | Junior Backend Engineer | Tallinn, Estonia | 19 Oct 2026 | she/her |
+| Employee | Joonas Laaksonen | joonas.laaksonen@nordtech.test | Senior Account Executive | Tampere, Finland | 26 Oct 2026 | he/him |
+| Employee | Mariana Lopes | mariana.lopes@nordtech.test | Product Designer | Porto, Portugal | Mar 2025 | she/her |
+| Employee | Alex Rinne | alex.rinne@nordtech.test | Site Reliability Engineer | Remote (employed in Finland) | Sep 2026 | they/them |
+| Employee | Duarte Mendes | duarte.mendes@nordtech.test | Marketing Lead | Porto, Portugal | May 2023 | he/him |
+
+Managers are the team leads from the org chart. The assistant uses each person's country for country-specific rules; remote work doesn't change it.
+
+### HR platform
+
+`/hr` is for the HR team only. The inbox lists the questions employees sent to HR, oldest first, with an overview of open questions, questions answered this week, and the most common unanswered topics (the closest document section, over the last 30 days). Each question shows who asked (name, email, job title, office), when, why the assistant couldn't answer, which documents it checked, and the earlier turns of the chat.
+
+HR writes an answer and chooses who it applies to: employees in the asker's country, or everyone. Sending it:
+
+1. adds the question and answer to the knowledge base as a new chunk (`source_doc: hr_answers`, `doc_type: faq_log`, `category: FAQ`, `country` set to that choice): it is embedded and written to Qdrant, and added to the running BM25 index, so the assistant can use it for similar questions straight away, without a restart
+2. marks the question `answered`, with who answered and when
+3. shows the answer in the employee's chat
+
+The answered list keeps every question HR has answered. Answers cited by the assistant open in the source viewer like any other source.
 
 ### Command line
 

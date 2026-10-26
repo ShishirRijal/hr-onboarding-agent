@@ -1,6 +1,8 @@
 "use client";
 
-import { useAppState } from "@/lib/app-state";
+import { firstName } from "@/lib/format";
+import { greetingFor } from "@/lib/offices";
+import { useSession } from "@/lib/session";
 
 const SUGGESTIONS = [
   "How much annual leave do I get?",
@@ -10,15 +12,12 @@ const SUGGESTIONS = [
 ];
 
 export function EmptyState({ onAsk }: { onAsk: (question: string) => void }) {
-  const { office } = useAppState();
+  const { user } = useSession();
 
   return (
     <div className="pt-[12vh] pb-8">
-      <h1
-        key={office.id}
-        className="greeting text-6xl font-bold tracking-tighter text-brand sm:text-7xl"
-      >
-        {office.greeting}
+      <h1 className="greeting text-6xl font-bold tracking-tighter text-brand sm:text-7xl">
+        {greetingFor(user)}, {firstName(user.name)}
       </h1>
       <p className="mt-4 max-w-xl text-lg leading-relaxed text-ink-soft">
         I&apos;m NordTech&apos;s HR assistant. Ask about leave, pay, benefits, IT setup or your first

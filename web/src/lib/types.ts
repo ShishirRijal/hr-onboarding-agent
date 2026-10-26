@@ -1,3 +1,22 @@
+export type Role = "employee" | "hr";
+
+// The signed-in user's profile. Where they work decides which country's rules the assistant uses.
+export type User = {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  job_title: string;
+  department: string;
+  // "Tallinn", "Tampere", "Porto", or "Remote".
+  office: string;
+  // The country they are employed in, also for remote employees.
+  country: string;
+  manager_name: string | null;
+  start_date: string;
+  pronouns: string | null;
+};
+
 export type Source = {
   chunk_id: string;
   source_doc?: string | null;
@@ -19,12 +38,6 @@ export type SourcePassage = {
   highlight_end: number | null;
 };
 
-export type EmployeeContext = {
-  employee_country?: string;
-  office_country?: string;
-  office_location?: string;
-};
-
 export type ChatResponse = {
   session_id: string;
   interaction_id: string | null;
@@ -39,7 +52,8 @@ export type ChatResponse = {
 
 // "offered": the documents had no answer and the employee was asked about HR.
 // "dismissed": they asked something else without choosing, which counts as a no.
-export type HrStatus = "offered" | "requested" | "declined" | "dismissed";
+// "answered": HR replied from the HR inbox.
+export type HrStatus = "offered" | "requested" | "declined" | "dismissed" | "answered";
 
 export type HrRequestResponse = {
   interaction_id: string;
@@ -64,7 +78,12 @@ export type SessionMessage = {
   answered: boolean;
   escalation_status: HrStatus | null;
   escalation_reason: string | null;
+  hr_answer: string | null;
+  hr_answered_by: string | null;
+  hr_answered_at: string | null;
 };
+
+export type HrReply = { text: string; by: string | null; at: string | null };
 
 export type UserMessage = { id: string; role: "user"; text: string };
 
@@ -81,12 +100,59 @@ export type AssistantMessage = {
   interactionId?: string;
   hrStatus?: HrStatus | "sending";
   hrMessage?: string;
+  hrReply?: HrReply;
 };
 
 export type ChatMessage = UserMessage | AssistantMessage;
+
+export type ChatSessionSummary = {
+  session_id: string;
+  title: string;
+  updated_at: string;
+  unread_hr_replies: number;
+};
 
 export type SessionSummary = {
   id: string;
   title: string;
   updatedAt: number;
+  // HR replies in this chat the user hasn't seen yet.
+  unread: number;
 };
+
+export type Asker = {
+  name: string;
+  email: string | null;
+  job_title: string | null;
+  department: string | null;
+  office: string | null;
+  country: string | null;
+};
+
+export type HrQuestion = {
+  interaction_id: string;
+  question: string;
+  asked_at: string;
+  asker: Asker;
+  status: "requested" | "answered";
+  reason: string;
+  hr_answer: string | null;
+  hr_answered_by: string | null;
+  hr_answered_at: string | null;
+  // "All", or the one country the answer was added to the knowledge base for.
+  hr_answer_country: string | null;
+};
+
+export type HrQuestionDetail = HrQuestion & {
+  documents_checked: string[];
+  earlier_turns: { question: string; answer: string }[];
+};
+
+export type HrOverview = {
+  open_questions: number;
+  answered_this_week: number;
+  common_topics: { topic: string; count: number }[];
+  topics_since: string;
+};
+
+export type AnswerScope = "country" | "everyone";
