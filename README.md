@@ -103,15 +103,24 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  Q[Question] --> CI[classify_intent]
-  CI --> RD[retrieve_docs]
-  RD --> GA[generate_answer]
-  GA --> SC[score_confidence]
-  SC -->|High confidence| RU[respond_to_user]
-  RU --> LI[log_interaction]
-  SC -->|Low confidence| EH[escalate_to_hr]
-  EH --> LU[log_unanswered]
+  Q[Message + recent turns] --> UM[understand_message]
+  UM -->|Small talk| CH[reply_in_chat]
+  UM -->|HR question| RF[resolve_filters]
+  RF --> RD[retrieve_documents]
+  RD --> SC[score_confidence]
+  SC -->|Medium or high| GA[generate_answer]
+  SC -->|Low| NF[answer_not_found]
+  GA -->|Answered| RU[respond_to_user]
+  GA -->|Declined| NF
+  CH --> LI[log_interaction]
+  RU --> LI
+  NF --> LI
 ```
+
+- `understand_message` sorts greetings, thanks and other small talk from HR questions, and rewrites follow-ups ("and in Finland?") into standalone questions using the last few turns of the chat.
+- `resolve_filters` searches the employee's own country, unless the question names another one.
+- Searches add the policies' own words for everyday ones ("vacation" also searches "annual leave"), see `retrieval/vocabulary.py`.
+- `answer_not_found` asks the employee whether to send the question to HR; nothing is sent until they say yes.
 
 ## Corpus
 

@@ -144,6 +144,17 @@ def test_chat_passes_question_and_context_and_returns_answer() -> None:
     assert state["employee_context"] == {"employee_country": "Estonia"}
     assert state["session_id"] == body["session_id"]
     assert state["retrieval_config"] == {"apply_reranker": False}
+    assert state["history"] == []
+
+
+def test_chat_passes_earlier_turns_of_the_session_as_history() -> None:
+    graph = FakeGraph()
+    with _client(graph) as client:
+        client.post("/chat", json={"message": "and in Finland?", "session_id": "s-1"})
+
+    assert graph.states[0]["history"] == [
+        {"question": "Can I bring my dog?", "answer": "Not in the HR documents. Ask HR?"}
+    ]
 
 
 def test_chat_offers_hr_when_the_documents_have_no_answer() -> None:

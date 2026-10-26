@@ -45,3 +45,20 @@ def test_stream_agent_reports_statuses_and_merges_the_final_state() -> None:
     assert event == "done"
     assert final["question"] == "Can I bring my dog?"
     assert final["final_response"]["answered"] is False
+
+
+class FakeChatGraph:
+    def stream(self, state, stream_mode):
+        yield "messages", (SimpleNamespace(content='{"kind": "chat"}'), {"langgraph_node": "understand_message"})
+        yield "updates", {"understand_message": {"message_route": {"kind": "chat", "search_query": ""}}}
+        yield "messages", (SimpleNamespace(content="Hi "), {"langgraph_node": "reply_in_chat"})
+        yield "messages", (SimpleNamespace(content="Shishir!"), {"langgraph_node": "reply_in_chat"})
+        yield "updates", {"reply_in_chat": {"final_response": {"text": "Hi Shishir!", "answered": True}}}
+
+
+def test_stream_agent_streams_chat_replies_but_not_routing() -> None:
+    events = list(stream_agent(FakeChatGraph(), {"question": "hi i'm shishir"}))
+
+    assert [payload["text"] for event, payload in events if event == "token"] == ["Hi ", "Shishir!"]
+    assert not [event for event, _ in events if event == "status"]
+    assert events[-1][1]["final_response"]["text"] == "Hi Shishir!"

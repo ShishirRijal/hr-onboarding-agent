@@ -6,6 +6,9 @@ from typing import Any, Iterator
 from agent.answering import INSUFFICIENT_CONTEXT_MARKER
 
 ANSWER_NODE = "generate_answer"
+CHAT_NODE = "reply_in_chat"
+# Only these nodes write text for the employee; other model calls (like routing) stay hidden.
+STREAMED_NODES = frozenset({ANSWER_NODE, CHAT_NODE})
 
 
 def sse(event: str, data: dict[str, Any]) -> str:
@@ -42,7 +45,7 @@ def stream_agent(graph: Any, state: dict[str, Any]) -> Iterator[tuple[str, dict[
         if mode == "messages":
             message, metadata = chunk
             content = getattr(message, "content", "")
-            if metadata.get("langgraph_node") == ANSWER_NODE and isinstance(content, str) and content:
+            if metadata.get("langgraph_node") in STREAMED_NODES and isinstance(content, str) and content:
                 released = gate.feed(content)
                 if released:
                     yield "token", {"text": released}
