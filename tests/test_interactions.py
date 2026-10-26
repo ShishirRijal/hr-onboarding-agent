@@ -81,6 +81,34 @@ def test_unanswered_hr_offer_is_dismissed_when_the_employee_asks_something_else(
     assert store.get(chosen_id).escalation_status == "requested"
 
 
+def test_contact_details_are_kept_only_when_the_question_goes_to_hr(tmp_path: Path) -> None:
+    store = InteractionStore(f"sqlite:///{tmp_path / 'interactions.db'}")
+    sent_id = store.log(_state("Can I bring my dog?", session_id="s-1", answered=False))
+    declined_id = store.log(_state("Is there parking?", session_id="s-2", answered=False))
+
+    store.record_hr_choice(sent_id, ask_hr=True, name="Shishir Rijal", email="shishir@nordtech.test")
+    store.record_hr_choice(declined_id, ask_hr=False, name="Shishir Rijal", email="shishir@nordtech.test")
+
+    sent = store.get(sent_id)
+    assert (sent.employee_name, sent.employee_email) == ("Shishir Rijal", "shishir@nordtech.test")
+    declined = store.get(declined_id)
+    assert (declined.employee_name, declined.employee_email) == (None, None)
+
+
+def test_pending_hr_requests_are_the_ones_not_yet_emailed(tmp_path: Path) -> None:
+    store = InteractionStore(f"sqlite:///{tmp_path / 'interactions.db'}")
+    first_id = store.log(_state("Can I bring my dog?", session_id="s-1", answered=False))
+    second_id = store.log(_state("Is there parking?", session_id="s-2", answered=False))
+    store.log(_state("Bike storage?", session_id="s-3", answered=False))
+    store.record_hr_choice(first_id, ask_hr=True, name="A", email="a@nordtech.test")
+    store.record_hr_choice(second_id, ask_hr=True, name="B", email="b@nordtech.test")
+
+    assert [item.id for item in store.pending_hr_requests()] == [first_id, second_id]
+    store.mark_hr_notified([first_id])
+    assert [item.id for item in store.pending_hr_requests()] == [second_id]
+    assert store.get(first_id).hr_notified_at is not None
+
+
 def test_answered_questions_cannot_be_sent_to_hr(tmp_path: Path) -> None:
     store = InteractionStore(f"sqlite:///{tmp_path / 'interactions.db'}")
     answered_id = store.log(_state("How much annual leave do I get?", session_id="s-1", answered=True))

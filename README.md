@@ -60,6 +60,7 @@ The agent is built around five tools:
    - Routes the query to a human HR contact rather than letting the model invent an answer.
    - Handles sensitive or edge-case questions such as grievances, legal ambiguity, or anything outside the policy set.
    - Formats the question and context into a structured handoff so HR can review it quickly.
+   - Asks the employee first, and only sends questions they agree to; those reach HR in one email at the end of the day, with who asked so HR can reply.
    - This is the system's safety valve and the main human-in-the-loop path.
 
 4. `Interaction Logger`
@@ -169,12 +170,14 @@ QDRANT_COLLECTION=nordtech_hr
 
 `COHERE_API_KEY` is optional. The API runs without Cohere reranking unless `USE_COHERE_RERANK=true` (the trial key is limited to 10 calls a minute).
 
-**1. Start Qdrant and ingest the corpus**
+**1. Start Qdrant and Mailpit, and ingest the corpus**
 
 ```bash
 docker compose up -d
 PYTHONPATH=. poetry run python scripts/ingest.py
 ```
+
+Mailpit catches the HR digest email locally, so nothing real is sent; its inbox is at http://localhost:8025.
 
 **2. Start the API** (port 8010)
 
@@ -190,6 +193,15 @@ PYTHONPATH=. poetry run uvicorn api.main:app --port 8010
 - `GET /health`
 
 Every question is logged to `data/interactions.db`. Questions the documents can't answer have `answered = 0` and `escalation_status` set to `offered`, then `requested` or `declined` once the employee chooses, or `dismissed` if they ask something else without choosing; the ones sent to HR also have `escalated = 1`.
+
+Declined and dismissed questions stay anonymous. Questions sent to HR also store who asked (`employee_name`, `employee_email`) so HR can reply; until there is sign-in, that is a placeholder `Employee <employee@nordtech.test>`, set in `api/main.py`.
+
+**HR digest email.** Once a day at `HR_DIGEST_TIME` (default 18:00, `Europe/Tallinn`) the API emails `HR_DIGEST_TO` every question sent to HR since the last digest: the question, who asked and their email, where they work, why the assistant couldn't answer, and which documents it checked. Nothing is sent on days without new questions. Each question is marked with `hr_notified_at` once the email is accepted, so a failed send is retried next time and nothing is sent twice. SMTP settings are in `.env.example`; set `HR_DIGEST_TIME=` (empty) to turn it off. To send it now, or from cron instead:
+
+```bash
+PYTHONPATH=. poetry run python scripts/send_hr_digest.py            # send now
+PYTHONPATH=. poetry run python scripts/send_hr_digest.py --dry-run  # print it, send nothing
+```
 
 **3. Start the web app** (port 3000)
 

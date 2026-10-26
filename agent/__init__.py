@@ -5,9 +5,9 @@ from .conversation import MESSAGE_CHAT, MESSAGE_HR, generate_chat_reply, route_m
 from .escalation import (
     HR_CONTACT_EMAIL,
     HR_REQUEST_DECLINED_MESSAGE,
-    HR_REQUEST_SENT_MESSAGE,
     NOT_FOUND_MESSAGE,
     build_hr_handoff,
+    hr_request_sent_message,
 )
 from .retrieval_graph import build_retrieval_graph
 from .state import (
@@ -29,7 +29,6 @@ __all__ = [
     "HRHandoff",
     "HR_CONTACT_EMAIL",
     "HR_REQUEST_DECLINED_MESSAGE",
-    "HR_REQUEST_SENT_MESSAGE",
     "MESSAGE_CHAT",
     "MESSAGE_HR",
     "NOT_FOUND_MESSAGE",
@@ -41,5 +40,6 @@ __all__ = [
     "build_retrieval_graph",
     "generate_chat_reply",
     "generate_grounded_answer",
+    "hr_request_sent_message",
     "route_message",
 ]

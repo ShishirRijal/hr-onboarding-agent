@@ -83,12 +83,12 @@ class FakeStore:
             )
         ]
 
-    def record_hr_choice(self, interaction_id, *, ask_hr):
+    def record_hr_choice(self, interaction_id, *, ask_hr, name=None, email=None):
         if interaction_id == "missing":
             return None
         if interaction_id == "answered":
             raise ValueError("answered")
-        self.choices.append((interaction_id, ask_hr))
+        self.choices.append((interaction_id, ask_hr, name, email))
         return SimpleNamespace(id=interaction_id, escalation_status="requested" if ask_hr else "declined")
 
 
@@ -217,7 +217,7 @@ def test_chat_stream_reports_errors_as_an_event() -> None:
     assert events[-1] == ("error", {"detail": "The assistant is temporarily unavailable."})
 
 
-def test_hr_request_records_the_employees_choice() -> None:
+def test_hr_request_records_the_choice_and_who_asked_only_when_sent() -> None:
     store = FakeStore()
     with _client(store=store) as client:
         yes = client.post("/interactions/interaction-1/hr-request", json={"ask_hr": True})
@@ -225,9 +225,13 @@ def test_hr_request_records_the_employees_choice() -> None:
 
     assert yes.status_code == 200
     assert yes.json()["escalation_status"] == "requested"
-    assert "HR team" in yes.json()["message"]
+    assert "employee@nordtech.test" in yes.json()["message"]
     assert no.json()["escalation_status"] == "declined"
-    assert store.choices == [("interaction-1", True), ("interaction-2", False)]
+    # The store keeps the name and email only for questions sent to HR.
+    assert store.choices == [
+        ("interaction-1", True, "Employee", "employee@nordtech.test"),
+        ("interaction-2", False, "Employee", "employee@nordtech.test"),
+    ]
 
 
 def test_hr_request_rejects_unknown_or_answered_questions() -> None:
