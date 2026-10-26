@@ -43,7 +43,9 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
     sessionId ? "loading" : "ready",
   );
   const sessionIdRef = useRef(sessionId);
-  const endRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const followRef = useRef(true);
   const busy = messages.some(
     (message) => message.role === "assistant" && (message.status === "pending" || message.status === "streaming"),
   );
@@ -69,9 +71,24 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
     };
   }, [sessionId]);
 
+  // Keep the newest text in view as it is written, unless the reader has scrolled up.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
-  }, [messages]);
+    const scroller = scrollerRef.current;
+    const content = contentRef.current;
+    if (!scroller || !content) return;
+    const onScroll = () => {
+      followRef.current = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
+    };
+    const observer = new ResizeObserver(() => {
+      if (followRef.current) scroller.scrollTop = scroller.scrollHeight;
+    });
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    observer.observe(content);
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      observer.disconnect();
+    };
+  }, []);
 
   const updateAssistant = useCallback(
     (id: string, patch: Partial<AssistantMessage> | ((message: AssistantMessage) => Partial<AssistantMessage>)) => {
@@ -122,6 +139,7 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
   );
 
   function send(question: string) {
+    followRef.current = true;
     const assistantId = crypto.randomUUID();
     setMessages((current) => [
       ...current,
@@ -141,8 +159,14 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
   }
 
   function retry(message: AssistantMessage) {
-    updateAssistant(message.id, { status: "pending", text: "", steps: [] });
-    void ask(message.id, message.question);
+    // A new id remounts the reply, so its progress and timer start over.
+    const assistantId = crypto.randomUUID();
+    setMessages((current) =>
+      current.map((item) =>
+        item.id === message.id ? { ...message, id: assistantId, status: "pending", text: "", steps: [] } : item,
+      ),
+    );
+    void ask(assistantId, message.question);
   }
 
   async function chooseHr(message: AssistantMessage, askHr: boolean) {
@@ -158,8 +182,8 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[46rem] px-4 sm:px-6">
+      <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto">
+        <div ref={contentRef} className="mx-auto w-full max-w-[46rem] px-4 sm:px-6">
           {historyState === "loading" && <p className="pending pt-10 text-ink-soft">Loading this chat…</p>}
           {historyState === "error" && (
             <p className="pt-10 text-ink-soft">
@@ -169,13 +193,14 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
           {historyState === "ready" && messages.length === 0 && <EmptyState onAsk={send} />}
           {messages.length > 0 && (
             <ol aria-live="polite" className="space-y-7 py-8">
-              {messages.map((message) => (
+              {messages.map((message, index) => (
                 <li key={message.id}>
                   {message.role === "user" ? (
                     <UserBubble message={message} />
                   ) : (
                     <AssistantReply
                       message={message}
+                      latest={index === messages.length - 1}
                       onRetry={() => retry(message)}
                       onChooseHr={(askHr) => void chooseHr(message, askHr)}
                     />
@@ -184,7 +209,6 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
               ))}
             </ol>
           )}
-          <div ref={endRef} />
         </div>
       </div>
 
