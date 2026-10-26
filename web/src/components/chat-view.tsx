@@ -3,11 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, fetchSessionMessages, requestHr, streamMessage } from "@/lib/api";
 import { useAppState } from "@/lib/app-state";
-import type { AssistantMessage, ChatMessage, ProgressStep, SessionMessage, Source } from "@/lib/types";
+import type { AssistantMessage, ChatMessage, HrReply, ProgressStep, SessionMessage, Source } from "@/lib/types";
 import { Composer } from "./composer";
 import { EmptyState } from "./empty-state";
 import { AssistantReply, UserBubble } from "./messages";
 import { SourcePanel } from "./source-panel";
+
+function hrReplyOf(item: SessionMessage): HrReply | undefined {
+  return item.hr_answer ? { text: item.hr_answer, by: item.hr_answered_by, at: item.hr_answered_at } : undefined;
+}
 
 function historyToMessages(history: SessionMessage[]): ChatMessage[] {
   return history.flatMap((item) => [
@@ -23,12 +27,29 @@ function historyToMessages(history: SessionMessage[]): ChatMessage[] {
       answered: item.answered,
       interactionId: item.interaction_id,
       hrStatus: item.escalation_status ?? undefined,
+      hrReply: hrReplyOf(item),
     },
   ]);
 }
 
+// Adds HR replies that arrived while the chat was open to the questions they answer.
+function withHrReplies(messages: ChatMessage[], history: SessionMessage[]): ChatMessage[] {
+  const replies = new Map(history.filter((item) => item.hr_answer).map((item) => [item.interaction_id, item]));
+  return messages.map((message) => {
+    const reply = message.role === "assistant" && message.interactionId ? replies.get(message.interactionId) : undefined;
+    return reply ? { ...message, hrStatus: "answered" as const, hrReply: hrReplyOf(reply) } : message;
+  });
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : "Something went wrong while getting an answer.";
+}
+
+function historyError(error: unknown): string {
+  if (error instanceof ApiError && error.status === 404) {
+    return "This chat isn't available. It may have been started with a different account.";
+  }
+  return "This chat couldn't be loaded. Check that the API is running, then reload the page.";
 }
 
 function withStep(steps: ProgressStep[], step: ProgressStep): ProgressStep[] {
@@ -38,7 +59,8 @@ function withStep(steps: ProgressStep[], step: ProgressStep): ProgressStep[] {
 }
 
 export function ChatView({ sessionId }: { sessionId: string | null }) {
-  const { office, saveSession, setActiveSessionId } = useAppState();
+  const { sessions, activeSessionId, saveSession, setActiveSessionId, markSessionRead, refreshSessions } =
+    useAppState();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // The source open beside the chat, and the chip that opened it so focus can go back there.
   const [openSource, setOpenSource] = useState<{ source: Source; messageId: string } | null>(null);
@@ -50,6 +72,7 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
   const [historyState, setHistoryState] = useState<"loading" | "ready" | "error">(
     sessionId ? "loading" : "ready",
   );
+  const [historyErrorText, setHistoryErrorText] = useState("");
   const sessionIdRef = useRef(sessionId);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -69,15 +92,36 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
       .then((history) => {
         if (cancelled) return;
         setMessages(historyToMessages(history));
+        // Opening the chat shows any HR replies, so they're no longer new.
+        markSessionRead(sessionId);
         setHistoryState("ready");
       })
-      .catch(() => {
-        if (!cancelled) setHistoryState("error");
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setHistoryErrorText(historyError(error));
+        setHistoryState("error");
       });
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, markSessionRead]);
+
+  // The chat list is checked for HR replies now and then; one for this chat is shown in place.
+  const unreadHere = sessions.find((session) => session.id === activeSessionId)?.unread ?? 0;
+  useEffect(() => {
+    if (!activeSessionId || unreadHere === 0 || historyState !== "ready") return;
+    let cancelled = false;
+    fetchSessionMessages(activeSessionId)
+      .then((history) => {
+        if (cancelled) return;
+        setMessages((current) => withHrReplies(current, history));
+        markSessionRead(activeSessionId);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, unreadHere, historyState, markSessionRead]);
 
   // Keep the newest text in view as it is written, unless the reader has scrolled up.
   useEffect(() => {
@@ -120,11 +164,11 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
         window.history.replaceState(null, "", `/c/${id}`);
         setActiveSessionId(id);
       }
-      saveSession({ id, title: question.slice(0, 80), updatedAt: Date.now() });
+      saveSession({ id, title: question.slice(0, 80), updatedAt: Date.now(), unread: 0 });
 
       try {
         const response = await streamMessage(
-          { message: question, sessionId: id, employeeContext: office.context },
+          { message: question, sessionId: id },
           {
             onStatus: (step) => updateAssistant(assistantId, (message) => ({ steps: withStep(message.steps, step) })),
             onToken: (text) =>
@@ -139,11 +183,13 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
           interactionId: response.interaction_id ?? undefined,
           hrStatus: response.escalation_status ?? undefined,
         });
+        // The chat is stored now, with its title from the first question.
+        refreshSessions();
       } catch (error) {
         updateAssistant(assistantId, { status: "error", text: errorMessage(error) });
       }
     },
-    [office.context, saveSession, setActiveSessionId, updateAssistant],
+    [saveSession, setActiveSessionId, updateAssistant, refreshSessions],
   );
 
   function send(question: string) {
@@ -199,11 +245,7 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
         <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto">
           <div ref={contentRef} className="mx-auto w-full max-w-[46rem] px-4 sm:px-6">
             {historyState === "loading" && <p className="pending pt-10 text-ink-soft">Loading this chat…</p>}
-            {historyState === "error" && (
-              <p className="pt-10 text-ink-soft">
-                This chat couldn&apos;t be loaded. Check that the API is running, then reload the page.
-              </p>
-            )}
+            {historyState === "error" && <p className="pt-10 text-ink-soft">{historyErrorText}</p>}
             {historyState === "ready" && messages.length === 0 && <EmptyState onAsk={send} />}
             {messages.length > 0 && (
               <ol aria-live="polite" className="space-y-7 py-8">

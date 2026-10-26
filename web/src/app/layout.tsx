@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import { AppShell } from "@/components/app-shell";
-import { AppStateProvider } from "@/lib/app-state";
 import "./globals.css";
 
 const inter = Inter({
@@ -14,14 +12,11 @@ export const metadata: Metadata = {
   description: "Answers to NordTech HR and onboarding questions, from company policy.",
 };
 
+// Each area brings its own shell: the employee chat, the HR platform, and sign-in without one.
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${inter.variable} h-full`}>
-      <body className="h-full">
-        <AppStateProvider>
-          <AppShell>{children}</AppShell>
-        </AppStateProvider>
-      </body>
+      <body className="h-full">{children}</body>
     </html>
   );
 }

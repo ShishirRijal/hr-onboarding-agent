@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Markdown from "react-markdown";
 import { documentTitle, sectionLabel } from "@/lib/documents";
-import type { AssistantMessage, Source, UserMessage } from "@/lib/types";
+import { formatDateTime } from "@/lib/format";
+import type { AssistantMessage, HrReply, Source, UserMessage } from "@/lib/types";
 import { usePacedCount, useSmoothText } from "@/lib/use-reveal";
 import { AssistantMark } from "./assistant-mark";
 import { ProgressSteps } from "./progress-steps";
@@ -170,14 +171,38 @@ function NotFound({
             Sent to HR
           </p>
           <p className="mt-0.5 text-sm text-ink">
-            {message.hrMessage ?? "Your question goes to the HR team in their end-of-day summary."}
+            {message.hrMessage ?? "Your question is with the HR team. Their answer will appear in this chat."}
           </p>
         </div>
       )}
 
+      {message.hrStatus === "answered" && message.hrReply && <HrReplyCard reply={message.hrReply} />}
+
       {message.hrStatus === "declined" && (
         <p className="step-in mt-3 text-sm text-ink-soft">{message.hrMessage ?? "Not sent to HR."}</p>
       )}
+    </div>
+  );
+}
+
+// HR's answer to a question the employee sent them, written in the HR inbox. Shown as
+// HR typed it, under a reminder that the question went to HR.
+function HrReplyCard({ reply }: { reply: HrReply }) {
+  return (
+    <div className="step-in mt-3">
+      <p className="flex items-center gap-2 text-sm font-semibold text-lamp">
+        <span className="size-2 rounded-full bg-lamp-line" aria-hidden="true" />
+        Sent to HR
+      </p>
+      <div className="mt-2 rounded-2xl border border-line bg-surface px-4 py-3 shadow-[0_1px_3px_rgb(6_26_55/0.06)]">
+        <h3 className="flex flex-wrap items-baseline gap-x-2 text-sm">
+          <span className="font-semibold text-ink">Answer from HR</span>
+          <span className="text-ink-soft">
+            {[reply.by, reply.at ? formatDateTime(reply.at) : null].filter(Boolean).join(" · ")}
+          </span>
+        </h3>
+        <p className="mt-1.5 leading-relaxed whitespace-pre-wrap text-ink">{reply.text}</p>
+      </div>
     </div>
   );
 }
@@ -191,10 +216,12 @@ function SourceList({
   openChunkId: string | null;
   onOpen: (source: Source, opener: HTMLElement) => void;
 }) {
+  // Answers HR wrote in the HR inbox aren't policy sections.
+  const noun = sources.some((source) => source.source_doc === "hr_answers") ? "source" : "policy section";
   return (
     <div className="step-in mt-4">
       <h3 className="text-sm text-ink-soft">
-        From {sources.length === 1 ? "1 policy section" : `${sources.length} policy sections`}
+        From {sources.length === 1 ? `1 ${noun}` : `${sources.length} ${noun}s`}
       </h3>
       <ul className="mt-2 flex flex-wrap gap-2">
         {sources.map((source) => {

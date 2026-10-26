@@ -11,6 +11,8 @@ const DOCUMENT_TITLES: Record<string, string> = {
   org_chart: "Org Chart & Team Directory",
   gdpr_employee_policy: "GDPR Employee Data Policy",
   eu_ai_act_summary: "EU AI Act Compliance Summary",
+  // Questions the HR team answered in the HR inbox, added to the knowledge base.
+  hr_answers: "Answers from HR",
 };
 
 export function documentTitle(source: Source): string {
