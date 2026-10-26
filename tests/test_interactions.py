@@ -67,6 +67,20 @@ def test_hr_choice_is_recorded_on_the_interaction(tmp_path: Path) -> None:
     assert store.record_hr_choice("missing", ask_hr=True) is None
 
 
+def test_unanswered_hr_offer_is_dismissed_when_the_employee_asks_something_else(tmp_path: Path) -> None:
+    store = InteractionStore(f"sqlite:///{tmp_path / 'interactions.db'}")
+    offered_id = store.log(_state("Can I bring my dog?", session_id="s-1", answered=False))
+    chosen_id = store.log(_state("Is there parking?", session_id="s-2", answered=False))
+    store.record_hr_choice(chosen_id, ask_hr=True)
+
+    store.log(_state("How much leave do I get?", session_id="s-1", answered=True))
+    store.log(_state("And in Finland?", session_id="s-2", answered=True))
+
+    assert store.get(offered_id).escalation_status == "dismissed"
+    assert store.get(offered_id).escalated is False
+    assert store.get(chosen_id).escalation_status == "requested"
+
+
 def test_answered_questions_cannot_be_sent_to_hr(tmp_path: Path) -> None:
     store = InteractionStore(f"sqlite:///{tmp_path / 'interactions.db'}")
     answered_id = store.log(_state("How much annual leave do I get?", session_id="s-1", answered=True))

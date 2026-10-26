@@ -23,7 +23,7 @@ export function Composer({ disabled, onSend }: { disabled: boolean; onSend: (tex
         event.preventDefault();
         submit();
       }}
-      className="flex items-end gap-2 rounded-2xl border border-birch bg-paper p-2 pl-4 shadow-[0_1px_2px_rgb(28_43_54/0.06)] focus-within:border-baltic"
+      className="flex items-end gap-2 rounded-[1.75rem] border border-line bg-surface p-2 pl-5 shadow-[0_4px_16px_rgb(6_26_55/0.06)] transition-[border-color,box-shadow] focus-within:border-brand-bright focus-within:ring-4 focus-within:ring-brand-bright/15"
     >
       <label htmlFor="message" className="sr-only">
         Your question
@@ -52,7 +52,7 @@ export function Composer({ disabled, onSend }: { disabled: boolean; onSend: (tex
         type="submit"
         disabled={!canSend}
         aria-label="Send"
-        className="grid size-9 shrink-0 place-items-center rounded-xl bg-baltic text-paper hover:bg-baltic-deep disabled:bg-birch disabled:text-ink-faint"
+        className="grid size-10 shrink-0 place-items-center rounded-full bg-brand text-white transition-colors hover:bg-brand-deep disabled:bg-muted disabled:text-ink-faint"
       >
         <SendIcon className="size-5" />
       </button>

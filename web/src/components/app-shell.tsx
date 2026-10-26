@@ -18,7 +18,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-dvh">
-      <aside className="hidden w-72 shrink-0 border-r border-birch bg-paper md:flex">
+      <aside className="hidden w-72 shrink-0 bg-muted md:flex">
         <Sidebar />
       </aside>
 
@@ -30,11 +30,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             aria-label="Close chats"
             onClick={() => setDrawerOpen(false)}
           />
-          <aside className="relative flex h-full w-[min(20rem,85vw)] bg-paper shadow-xl">
+          <aside className="relative flex h-full w-[min(20rem,85vw)] bg-muted shadow-xl">
             <Sidebar onNavigate={() => setDrawerOpen(false)} />
             <button
               type="button"
-              className="absolute top-4 right-3 rounded-md p-1.5 text-ink-soft hover:bg-ice"
+              className="absolute top-4 right-3 rounded-full p-1.5 text-ink-soft hover:bg-ink/5"
               aria-label="Close chats"
               onClick={() => setDrawerOpen(false)}
             >
@@ -45,16 +45,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       )}
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-birch bg-paper px-4 py-3 md:hidden">
+        <header className="flex items-center gap-3 border-b border-line bg-surface px-4 py-3 md:hidden">
           <button
             type="button"
-            className="-ml-1 rounded-md p-1.5 text-ink-soft hover:bg-ice"
+            className="-ml-1 rounded-full p-1.5 text-ink-soft hover:bg-muted"
             aria-label="Open chats"
             onClick={() => setDrawerOpen(true)}
           >
             <MenuIcon className="size-5" />
           </button>
-          <span className="font-semibold">NordTech HR</span>
+          <span className="font-bold tracking-tight">NordTech HR</span>
         </header>
         {children}
       </main>

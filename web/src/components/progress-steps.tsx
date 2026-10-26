@@ -18,7 +18,7 @@ function StepList({ steps, working, elapsed }: { steps: ProgressStep[]; working:
               {current ? (
                 <span className="spinner" />
               ) : (
-                <CheckIcon className={`size-4 text-baltic ${working ? "check-draw" : ""}`} />
+                <CheckIcon className={`size-4 text-brand ${working ? "check-draw" : ""}`} />
               )}
             </span>
             <span className="min-w-0">
@@ -71,7 +71,7 @@ export function ProgressSteps({
           type="button"
           onClick={() => setOpen((value) => !value)}
           aria-expanded={open}
-          className="step-in flex items-center gap-1 text-sm text-ink-soft hover:text-baltic"
+          className="step-in flex items-center gap-1 text-sm text-ink-soft hover:text-brand"
         >
           {summary}
           <ChevronIcon className={`size-4 transition-transform ${open ? "rotate-90" : ""}`} />
@@ -79,7 +79,7 @@ export function ProgressSteps({
       )}
       <div className={`fold ${working || open ? "is-open" : ""}`}>
         <div className="min-h-0 overflow-hidden">
-          <div className={`border-l border-birch pl-3 ${working ? "" : "mt-2"}`}>
+          <div className={`border-l border-line pl-3 ${working ? "" : "mt-2"}`}>
             <StepList steps={steps} working={working} elapsed={elapsed} />
           </div>
         </div>

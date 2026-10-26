@@ -11,7 +11,7 @@ import { ProgressSteps } from "./progress-steps";
 export function UserBubble({ message }: { message: UserMessage }) {
   return (
     <div className="flex justify-end">
-      <p className="max-w-[85%] rounded-2xl rounded-br-md bg-baltic-wash px-4 py-2.5 whitespace-pre-wrap text-ink">
+      <p className="max-w-[85%] rounded-3xl rounded-br-lg bg-brand-wash px-4 py-2.5 whitespace-pre-wrap text-ink">
         {message.text}
       </p>
     </div>
@@ -92,13 +92,13 @@ function ReplyBody({
 }) {
   if (message.status === "error") {
     return (
-      <div className="rounded-lg border-l-4 border-alert bg-alert-wash px-4 py-3">
-        <p className="font-medium text-alert">No answer this time</p>
+      <div className="rounded-2xl bg-alert-wash px-4 py-3">
+        <p className="font-semibold text-alert">No answer this time</p>
         <p className="mt-1 text-sm text-ink">{message.text}</p>
         <button
           type="button"
           onClick={onRetry}
-          className="mt-2 text-sm font-medium text-baltic underline underline-offset-2"
+          className="mt-2 text-sm font-semibold text-brand underline underline-offset-2"
         >
           Try again
         </button>
@@ -145,7 +145,7 @@ function NotFound({
             type="button"
             disabled={message.hrStatus === "sending"}
             onClick={() => onChooseHr(true)}
-            className="rounded-lg bg-baltic px-3.5 py-1.5 text-sm font-medium text-paper hover:bg-baltic-deep disabled:opacity-60"
+            className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-deep disabled:opacity-60"
           >
             {message.hrStatus === "sending" ? "Sending…" : "Yes, ask HR"}
           </button>
@@ -153,7 +153,7 @@ function NotFound({
             type="button"
             disabled={message.hrStatus === "sending"}
             onClick={() => onChooseHr(false)}
-            className="rounded-lg border border-birch bg-paper px-3.5 py-1.5 text-sm font-medium text-ink hover:border-baltic hover:text-baltic disabled:opacity-60"
+            className="rounded-full bg-muted px-4 py-2 text-sm font-semibold text-ink transition-colors hover:bg-line disabled:opacity-60"
           >
             No thanks
           </button>
@@ -164,8 +164,11 @@ function NotFound({
       )}
 
       {message.hrStatus === "requested" && (
-        <div className="step-in mt-3 rounded-lg border-l-4 border-lamp-line bg-lamp-wash px-4 py-2.5">
-          <p className="font-semibold text-lamp">Sent to HR</p>
+        <div className="step-in mt-3 rounded-2xl bg-lamp-wash px-4 py-3">
+          <p className="flex items-center gap-2 font-semibold text-lamp">
+            <span className="size-2 rounded-full bg-lamp-line" aria-hidden="true" />
+            Sent to HR
+          </p>
           <p className="mt-0.5 text-sm text-ink">
             {message.hrMessage ?? "Your question was sent to the HR team."}
           </p>
@@ -204,11 +207,11 @@ function SourceList({
                 onClick={(event) => onOpen(source, event.currentTarget)}
                 aria-pressed={open}
                 title="Open this section in the document"
-                className={`block w-full rounded-md border px-3 py-1.5 text-left text-sm transition-colors ${
-                  open ? "border-baltic bg-baltic-wash" : "border-birch bg-paper hover:border-baltic"
+                className={`block w-full rounded-xl border px-3 py-2 text-left text-sm transition-colors ${
+                  open ? "border-brand-bright bg-brand-wash" : "border-line bg-surface hover:border-brand-bright"
                 }`}
               >
-                <span className="block truncate font-medium text-baltic-deep">{documentTitle(source)}</span>
+                <span className="block truncate font-semibold text-ink">{documentTitle(source)}</span>
                 {section && <span className="block truncate text-ink-soft">{section}</span>}
               </button>
             </li>

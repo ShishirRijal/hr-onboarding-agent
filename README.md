@@ -180,7 +180,7 @@ PYTHONPATH=. poetry run uvicorn api.main:app --port 8010
 - `GET /sources/{chunk_id}` returns the source document of a cited chunk with the chunk's character span, so the UI can open it with that part highlighted
 - `GET /health`
 
-Every question is logged to `data/interactions.db`. Questions the documents can't answer have `answered = 0` and `escalation_status` set to `offered`, then `requested` or `declined` once the employee chooses; the ones sent to HR also have `escalated = 1`.
+Every question is logged to `data/interactions.db`. Questions the documents can't answer have `answered = 0` and `escalation_status` set to `offered`, then `requested` or `declined` once the employee chooses, or `dismissed` if they ask something else without choosing; the ones sent to HR also have `escalated = 1`.
 
 **3. Start the web app** (port 3000)
 

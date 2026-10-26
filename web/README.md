@@ -19,4 +19,4 @@ The app calls `/api/*`, which `next.config.ts` proxies to the FastAPI backend (`
 
 ## Design
 
-Cool "Baltic light" palette defined as Tailwind theme tokens in `src/app/globals.css`. Familjen Grotesk for the interface and Source Serif 4 for the assistant's answers, so policy answers read like the documents they come from. Amber is reserved for questions sent to HR.
+White and green palette defined as Tailwind theme tokens in `src/app/globals.css`, with neutral token names (`canvas`, `surface`, `muted`, `line`, `brand`) so the theme can change without touching components. Solid green (`brand`) is used for actions and links; the brighter green (`brand-bright`) only for decoration such as the assistant mark, progress and highlights, because white text on it is too low in contrast. Inter throughout, pill-shaped buttons. Orange is reserved for questions sent to HR.

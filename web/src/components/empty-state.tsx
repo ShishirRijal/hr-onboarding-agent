@@ -16,23 +16,23 @@ export function EmptyState({ onAsk }: { onAsk: (question: string) => void }) {
     <div className="pt-[12vh] pb-8">
       <h1
         key={office.id}
-        className="greeting text-6xl font-semibold tracking-tight text-baltic sm:text-7xl"
+        className="greeting text-6xl font-bold tracking-tighter text-brand sm:text-7xl"
       >
         {office.greeting}
       </h1>
       <p className="mt-4 max-w-xl text-lg leading-relaxed text-ink-soft">
         I&apos;m NordTech&apos;s HR assistant. Ask about leave, pay, benefits, IT setup or your first
-        weeks here. I answer from company policy, and anything I can&apos;t answer goes to the HR team.
+        weeks here. I answer from company policy, and if it isn&apos;t covered I can pass your question to HR.
       </p>
 
-      <h2 className="mt-10 text-sm text-ink-soft">Try asking</h2>
-      <ul className="mt-2 divide-y divide-birch border-y border-birch">
+      <h2 className="mt-10 text-sm font-semibold text-ink">Try asking</h2>
+      <ul className="mt-3 grid gap-3 sm:grid-cols-2">
         {SUGGESTIONS.map((question) => (
           <li key={question}>
             <button
               type="button"
               onClick={() => onAsk(question)}
-              className="w-full py-3 text-left text-ink hover:text-baltic"
+              className="h-full w-full rounded-2xl bg-muted px-4 py-3.5 text-left font-medium text-ink transition-colors hover:bg-brand-wash"
             >
               {question}
             </button>

@@ -150,7 +150,12 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
     followRef.current = true;
     const assistantId = crypto.randomUUID();
     setMessages((current) => [
-      ...current,
+      // Asking something else withdraws any HR offer still waiting for an answer.
+      ...current.map((message) =>
+        message.role === "assistant" && message.hrStatus === "offered"
+          ? { ...message, hrStatus: "dismissed" as const }
+          : message,
+      ),
       { id: crypto.randomUUID(), role: "user", text: question },
       {
         id: assistantId,

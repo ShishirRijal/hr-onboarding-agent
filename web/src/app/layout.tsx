@@ -1,16 +1,11 @@
 import type { Metadata } from "next";
-import { Familjen_Grotesk, Source_Serif_4 } from "next/font/google";
+import { Inter } from "next/font/google";
 import { AppShell } from "@/components/app-shell";
 import { AppStateProvider } from "@/lib/app-state";
 import "./globals.css";
 
-const familjen = Familjen_Grotesk({
-  variable: "--font-familjen",
-  subsets: ["latin", "latin-ext"],
-});
-
-const sourceSerif = Source_Serif_4({
-  variable: "--font-source-serif",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin", "latin-ext"],
 });
 
@@ -21,7 +16,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${familjen.variable} ${sourceSerif.variable} h-full`}>
+    <html lang="en" className={`${inter.variable} h-full`}>
       <body className="h-full">
         <AppStateProvider>
           <AppShell>{children}</AppShell>
