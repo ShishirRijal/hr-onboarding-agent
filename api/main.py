@@ -5,6 +5,7 @@ import os
 import threading
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Iterator
 
 from dotenv import load_dotenv
@@ -15,22 +16,26 @@ from fastapi.responses import StreamingResponse
 from agent.escalation import HR_REQUEST_DECLINED_MESSAGE, HR_REQUEST_SENT_MESSAGE
 from interactions import HR_OFFERED
 
-from .schemas import ChatRequest, ChatResponse, HRRequest, HRRequestResponse, SessionMessage
+from .schemas import ChatRequest, ChatResponse, HRRequest, HRRequestResponse, SessionMessage, SourcePassage
 from .streaming import sse, stream_agent
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_WEB_ORIGINS = "http://localhost:3000"
+DEFAULT_CORPUS_DIR = "corpus"
 UNAVAILABLE_MESSAGE = "The assistant is temporarily unavailable."
+SOURCE_GONE_MESSAGE = (
+    "This source is no longer in the HR documents. Ask the question again to get current sources."
+)
 
 
-def create_app(*, graph: Any | None = None, store: Any | None = None) -> FastAPI:
+def create_app(*, graph: Any | None = None, store: Any | None = None, passages: Any | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        if graph is None or store is None:
-            app.state.graph, app.state.store = _build_agent()
+        if graph is None or store is None or passages is None:
+            app.state.graph, app.state.store, app.state.passages = _build_agent()
         else:
-            app.state.graph, app.state.store = graph, store
+            app.state.graph, app.state.store, app.state.passages = graph, store, passages
         # The embedding model is not safe to call from several threads at once,
         # so requests run the graph one at a time.
         app.state.graph_lock = threading.Lock()
@@ -115,6 +120,21 @@ def create_app(*, graph: Any | None = None, store: Any | None = None) -> FastAPI
             for interaction in http_request.app.state.store.list_session(session_id)
         ]
 
+    @app.get("/sources/{chunk_id}", response_model=SourcePassage)
+    def source_passage(chunk_id: str, http_request: Request) -> SourcePassage:
+        passage = http_request.app.state.passages.passage(chunk_id)
+        if passage is None:
+            raise HTTPException(status_code=404, detail=SOURCE_GONE_MESSAGE)
+        return SourcePassage(
+            chunk_id=passage.chunk_id,
+            source_doc=passage.source_doc,
+            source_file=passage.source_file,
+            section_path=passage.section_path,
+            content=passage.content,
+            highlight_start=passage.highlight_start,
+            highlight_end=passage.highlight_end,
+        )
+
     return app
 
 
@@ -146,12 +166,13 @@ def _chat_response(session_id: str, result: dict[str, Any]) -> ChatResponse:
     )
 
 
-def _build_agent() -> tuple[Any, Any]:
+def _build_agent() -> tuple[Any, Any, Any]:
     from qdrant_client import QdrantClient
 
     from agent import build_retrieval_graph
     from interactions import InteractionStore
     from retrieval import DEFAULT_COLLECTION_NAME, build_retrieval_engine
+    from retrieval.passages import PassageLibrary
 
     load_dotenv()
     client = QdrantClient(url=os.getenv("QDRANT_URL", "http://localhost:6333"))
@@ -160,7 +181,8 @@ def _build_agent() -> tuple[Any, Any]:
         collection_name=os.getenv("QDRANT_COLLECTION", DEFAULT_COLLECTION_NAME),
     )
     store = InteractionStore()
-    return build_retrieval_graph(engine, interaction_logger=store.log), store
+    passages = PassageLibrary(engine.bm25_index.chunks, Path(os.getenv("CORPUS_DIR", DEFAULT_CORPUS_DIR)))
+    return build_retrieval_graph(engine, interaction_logger=store.log), store, passages
 
 
 def _env_flag(name: str) -> bool:

@@ -29,6 +29,16 @@ class Source(BaseModel):
     score: float = 0.0
 
 
+class SourcePassage(BaseModel):
+    chunk_id: str
+    source_doc: str | None = None
+    source_file: str | None = None
+    section_path: str | None = None
+    content: str
+    highlight_start: int | None = None
+    highlight_end: int | None = None
+
+
 class ChatResponse(BaseModel):
     session_id: str
     interaction_id: str | None

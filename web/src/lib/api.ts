@@ -1,4 +1,11 @@
-import type { ChatResponse, EmployeeContext, HrRequestResponse, ProgressStep, SessionMessage } from "./types";
+import type {
+  ChatResponse,
+  EmployeeContext,
+  HrRequestResponse,
+  ProgressStep,
+  SessionMessage,
+  SourcePassage,
+} from "./types";
 
 const UNREACHABLE = "The HR assistant can't be reached. Check that the API is running.";
 
@@ -109,4 +116,17 @@ export function requestHr(interactionId: string, askHr: boolean): Promise<HrRequ
 
 export function fetchSessionMessages(sessionId: string): Promise<SessionMessage[]> {
   return request<SessionMessage[]>(`/sessions/${encodeURIComponent(sessionId)}/messages`);
+}
+
+// Documents only change on re-ingestion, so an opened source is kept for the session.
+const passages = new Map<string, Promise<SourcePassage>>();
+
+export function fetchSourcePassage(chunkId: string): Promise<SourcePassage> {
+  let passage = passages.get(chunkId);
+  if (!passage) {
+    passage = request<SourcePassage>(`/sources/${encodeURIComponent(chunkId)}`);
+    passage.catch(() => passages.delete(chunkId));
+    passages.set(chunkId, passage);
+  }
+  return passage;
 }

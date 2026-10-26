@@ -24,13 +24,17 @@ const STEP_MS = 650;
 export function AssistantReply({
   message,
   latest,
+  openChunkId,
   onRetry,
   onChooseHr,
+  onOpenSource,
 }: {
   message: AssistantMessage;
   latest: boolean;
+  openChunkId: string | null;
   onRetry: () => void;
   onChooseHr: (askHr: boolean) => void;
+  onOpenSource: (source: Source, opener: HTMLElement) => void;
 }) {
   // Replies loaded from history appear as they are; only replies written now are animated.
   const [live] = useState(() => message.status === "pending" || message.status === "streaming");
@@ -54,7 +58,15 @@ export function AssistantReply({
           startedAt={startedAt}
         />
         {!thinking && (
-          <ReplyBody message={message} text={text} typing={typing} onRetry={onRetry} onChooseHr={onChooseHr} />
+          <ReplyBody
+            message={message}
+            text={text}
+            typing={typing}
+            openChunkId={openChunkId}
+            onRetry={onRetry}
+            onChooseHr={onChooseHr}
+            onOpenSource={onOpenSource}
+          />
         )}
       </div>
     </div>
@@ -65,14 +77,18 @@ function ReplyBody({
   message,
   text,
   typing,
+  openChunkId,
   onRetry,
   onChooseHr,
+  onOpenSource,
 }: {
   message: AssistantMessage;
   text: string;
   typing: boolean;
+  openChunkId: string | null;
   onRetry: () => void;
   onChooseHr: (askHr: boolean) => void;
+  onOpenSource: (source: Source, opener: HTMLElement) => void;
 }) {
   if (message.status === "error") {
     return (
@@ -99,7 +115,9 @@ function ReplyBody({
       <div className={`answer ${typing ? "is-typing" : ""}`}>
         <Markdown>{text}</Markdown>
       </div>
-      {!typing && message.status === "done" && message.sources.length > 0 && <SourceList sources={message.sources} />}
+      {!typing && message.status === "done" && message.sources.length > 0 && (
+        <SourceList sources={message.sources} openChunkId={openChunkId} onOpen={onOpenSource} />
+      )}
     </div>
   );
 }
@@ -161,7 +179,15 @@ function NotFound({
   );
 }
 
-function SourceList({ sources }: { sources: Source[] }) {
+function SourceList({
+  sources,
+  openChunkId,
+  onOpen,
+}: {
+  sources: Source[];
+  openChunkId: string | null;
+  onOpen: (source: Source, opener: HTMLElement) => void;
+}) {
   return (
     <div className="step-in mt-4">
       <h3 className="text-sm text-ink-soft">
@@ -170,13 +196,21 @@ function SourceList({ sources }: { sources: Source[] }) {
       <ul className="mt-2 flex flex-wrap gap-2">
         {sources.map((source) => {
           const section = sectionLabel(source);
+          const open = source.chunk_id === openChunkId;
           return (
-            <li
-              key={source.chunk_id}
-              className="max-w-full rounded-md border border-birch bg-paper px-3 py-1.5 text-sm sm:max-w-[22rem]"
-            >
-              <span className="block truncate font-medium text-baltic-deep">{documentTitle(source)}</span>
-              {section && <span className="block truncate text-ink-soft">{section}</span>}
+            <li key={source.chunk_id} className="max-w-full sm:max-w-[22rem]">
+              <button
+                type="button"
+                onClick={(event) => onOpen(source, event.currentTarget)}
+                aria-pressed={open}
+                title="Open this section in the document"
+                className={`block w-full rounded-md border px-3 py-1.5 text-left text-sm transition-colors ${
+                  open ? "border-baltic bg-baltic-wash" : "border-birch bg-paper hover:border-baltic"
+                }`}
+              >
+                <span className="block truncate font-medium text-baltic-deep">{documentTitle(source)}</span>
+                {section && <span className="block truncate text-ink-soft">{section}</span>}
+              </button>
             </li>
           );
         })}

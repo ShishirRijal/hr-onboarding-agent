@@ -177,6 +177,7 @@ PYTHONPATH=. poetry run uvicorn api.main:app --port 8010
 - `POST /chat` answers in one response: `{"message": "...", "session_id": "...", "employee_context": {"employee_country": "Estonia"}}`
 - `POST /interactions/{interaction_id}/hr-request` records whether the employee wants an unanswered question sent to HR: `{"ask_hr": true}`
 - `GET /sessions/{session_id}/messages` returns a chat's history
+- `GET /sources/{chunk_id}` returns the source document of a cited chunk with the chunk's character span, so the UI can open it with that part highlighted
 - `GET /health`
 
 Every question is logged to `data/interactions.db`. Questions the documents can't answer have `answered = 0` and `escalation_status` set to `offered`, then `requested` or `declined` once the employee chooses; the ones sent to HR also have `escalated = 1`.

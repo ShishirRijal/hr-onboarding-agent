@@ -92,8 +92,23 @@ class FakeStore:
         return SimpleNamespace(id=interaction_id, escalation_status="requested" if ask_hr else "declined")
 
 
+class FakePassages:
+    def passage(self, chunk_id):
+        if chunk_id != "chunk-1":
+            return None
+        return SimpleNamespace(
+            chunk_id="chunk-1",
+            source_doc="leave_policy",
+            source_file="leave_absence_policy.md",
+            section_path="Leave > Estonia",
+            content="# Leave\n\n## Estonia\n\n28 calendar days.",
+            highlight_start=21,
+            highlight_end=38,
+        )
+
+
 def _client(graph: FakeGraph | None = None, store: FakeStore | None = None) -> TestClient:
-    return TestClient(create_app(graph=graph or FakeGraph(), store=store or FakeStore()))
+    return TestClient(create_app(graph=graph or FakeGraph(), store=store or FakeStore(), passages=FakePassages()))
 
 
 def _events(response) -> list[tuple[str, dict[str, object]]]:
@@ -217,3 +232,18 @@ def test_session_messages_returns_history_with_hr_status() -> None:
     assert messages[0]["question"] == "Can I bring my dog?"
     assert messages[0]["answered"] is False
     assert messages[0]["escalation_status"] == "requested"
+
+
+def test_source_returns_the_document_with_the_chunk_highlighted() -> None:
+    with _client() as client:
+        response = client.get("/sources/chunk-1")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_doc"] == "leave_policy"
+    assert body["content"][body["highlight_start"] : body["highlight_end"]] == "28 calendar days."
+
+
+def test_source_returns_404_for_unknown_chunks() -> None:
+    with _client() as client:
+        assert client.get("/sources/unknown").status_code == 404
