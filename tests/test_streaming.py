@@ -2,23 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from api.streaming import MarkerGate, stream_agent
-
-
-def test_marker_gate_releases_normal_text_once_it_cannot_be_the_marker() -> None:
-    gate = MarkerGate()
-
-    assert gate.feed("I") == ""
-    assert gate.feed("n Estonia") == "In Estonia"
-    assert gate.feed(" you get") == " you get"
-
-
-def test_marker_gate_never_releases_the_marker() -> None:
-    gate = MarkerGate()
-
-    released = "".join(gate.feed(token) for token in ("INS", "UFFICIENT", "_CONTEXT", "."))
-
-    assert released == ""
+from api.streaming import stream_agent
 
 
 class FakeStreamingGraph:
@@ -62,3 +46,23 @@ def test_stream_agent_streams_chat_replies_but_not_routing() -> None:
     assert [payload["text"] for event, payload in events if event == "token"] == ["Hi ", "Shishir!"]
     assert not [event for event, _ in events if event == "status"]
     assert events[-1][1]["final_response"]["text"] == "Hi Shishir!"
+
+
+class FakeCheckedAnswerGraph:
+    def stream(self, state, stream_mode):
+        yield "updates", {"score_confidence": {"confidence_label": "medium"}}
+        # A draft is never streamed: only checked answers reach the employee.
+        yield "messages", (SimpleNamespace(content="Draft text"), {"langgraph_node": "generate_answer"})
+        yield "updates", {"generate_answer": {"answer_declined": False}}
+        check = {"answers_question": True, "unsupported_claims": [], "missing_details": ["Finance approves over €300"]}
+        yield "updates", {"check_answer": {"answer_check": check}}
+        yield "updates", {"revise_answer": {"answer_check": {**check, "revised": True}}}
+        yield "updates", {"respond_to_user": {"final_response": {"text": "Your manager and Finance.", "answered": True}}}
+
+
+def test_stream_agent_reports_the_answer_check_and_never_streams_drafts() -> None:
+    events = list(stream_agent(FakeCheckedAnswerGraph(), {"question": "Who approves this?"}))
+
+    assert [payload["stage"] for event, payload in events if event == "status"] == ["writing", "verifying", "revising"]
+    assert not [event for event, _ in events if event == "token"]
+    assert events[-1][1]["final_response"]["text"] == "Your manager and Finance."

@@ -15,10 +15,12 @@ from retrieval import (
 )
 from retrieval.vocabulary import add_policy_terms
 
+from .answer_check import check_answer, revision_feedback
 from .answering import generate_grounded_answer, is_insufficient_answer
 from .conversation import MESSAGE_CHAT, generate_chat_reply, recent_history, route_message
 from .escalation import NOT_FOUND_MESSAGE, build_hr_handoff
 from .state import (
+    AnswerCheck,
     AnswerSource,
     ConversationTurn,
     EmployeeContext,
@@ -62,6 +64,7 @@ def build_retrieval_graph(
     answer_generator: Callable[..., str] | None = None,
     message_router: Callable[[str, list[ConversationTurn]], MessageRoute] = route_message,
     chat_responder: Callable[..., str] = generate_chat_reply,
+    answer_checker: Callable[..., AnswerCheck] = check_answer,
     interaction_logger: Callable[[RetrievalState], str] | None = None,
     state_graph_cls: Any | None = None,
     start_token: Any | None = None,
@@ -93,6 +96,11 @@ def build_retrieval_graph(
         "generate_answer",
         _make_generate_answer_node(answer_generator=answer_generator or generate_grounded_answer),
     )
+    graph.add_node("check_answer", _make_check_answer_node(answer_checker))
+    graph.add_node(
+        "revise_answer",
+        _make_revise_answer_node(answer_generator=answer_generator or generate_grounded_answer),
+    )
     graph.add_node("respond_to_user", _respond_to_user_node)
     graph.add_node("answer_not_found", _answer_not_found_node)
     graph.add_node("log_interaction", _make_log_interaction_node(interaction_logger))
@@ -117,6 +125,22 @@ def build_retrieval_graph(
     graph.add_conditional_edges(
         "generate_answer",
         _route_after_answer,
+        {"check_answer": "check_answer", "answer_not_found": "answer_not_found"},
+    )
+    # Self-check before the employee sees anything: a draft that doesn't really answer
+    # becomes an offer to ask HR, and one with unsupported or missing details is rewritten once.
+    graph.add_conditional_edges(
+        "check_answer",
+        _route_after_check,
+        {
+            "respond_to_user": "respond_to_user",
+            "revise_answer": "revise_answer",
+            "answer_not_found": "answer_not_found",
+        },
+    )
+    graph.add_conditional_edges(
+        "revise_answer",
+        _route_after_revision,
         {"respond_to_user": "respond_to_user", "answer_not_found": "answer_not_found"},
     )
     graph.add_edge("respond_to_user", "log_interaction")
@@ -250,6 +274,60 @@ def _make_generate_answer_node(
     return _generate_answer_node
 
 
+def _declined_update(state: RetrievalState, **extra: Any) -> dict[str, Any]:
+    """There is no answer to give: the employee is offered HR instead."""
+    sources = state.get("generated_answer", {}).get("sources", [])
+    return {
+        "generated_answer": {"text": "", "sources": sources},
+        "answer_declined": True,
+        "confidence_score": 0.0,
+        "confidence_label": "low",
+        "confidence_debug": {**state.get("confidence_debug", {}), "answer_declined": True},
+        **extra,
+    }
+
+
+def _make_check_answer_node(answer_checker: Callable[..., AnswerCheck]) -> Callable[[RetrievalState], dict[str, Any]]:
+    def _check_answer_node(state: RetrievalState) -> dict[str, Any]:
+        draft = state.get("generated_answer", {}).get("text", "")
+        check = answer_checker(
+            _clean_required_value(state.get("question"), field_name="question"),
+            state.get("retrieved_chunks", []),
+            draft,
+            history=state.get("history", []),
+        )
+        if not check["answers_question"]:
+            # The draft talks around the question ("not covered", "case by case"), so it
+            # goes to HR rather than to the employee.
+            return _declined_update(state, answer_check=check)
+        return {"answer_check": check}
+
+    return _check_answer_node
+
+
+def _make_revise_answer_node(*, answer_generator: Callable[..., str]) -> Callable[[RetrievalState], dict[str, Any]]:
+    def _revise_answer_node(state: RetrievalState) -> dict[str, Any]:
+        check = state["answer_check"]
+        chunks = state.get("retrieved_chunks", [])
+        text = answer_generator(
+            _clean_required_value(state.get("question"), field_name="question"),
+            chunks,
+            history=state.get("history", []),
+            employee_context=state.get("employee_context", {}),
+            draft=state.get("generated_answer", {}).get("text", ""),
+            feedback=revision_feedback(check),
+        ).strip()
+        revised_check: AnswerCheck = {**check, "revised": True}
+        if not text or is_insufficient_answer(text):
+            return _declined_update(state, answer_check=revised_check)
+        return {
+            "generated_answer": {"text": text, "sources": _build_answer_sources(chunks)},
+            "answer_check": revised_check,
+        }
+
+    return _revise_answer_node
+
+
 def _build_answer_sources(chunks: list[dict[str, Any]]) -> list[AnswerSource]:
     sources: list[AnswerSource] = []
     seen: set[tuple[Any, ...]] = set()
@@ -358,6 +436,21 @@ def _route_after_confidence(state: RetrievalState) -> str:
 
 
 def _route_after_answer(state: RetrievalState) -> str:
+    return "answer_not_found" if state.get("answer_declined") else "check_answer"
+
+
+def _route_after_check(state: RetrievalState) -> str:
+    check = state.get("answer_check")
+    if check is None:
+        return "respond_to_user"
+    if not check["answers_question"]:
+        return "answer_not_found"
+    if check["unsupported_claims"] or check["missing_details"]:
+        return "revise_answer"
+    return "respond_to_user"
+
+
+def _route_after_revision(state: RetrievalState) -> str:
     return "answer_not_found" if state.get("answer_declined") else "respond_to_user"
 
 

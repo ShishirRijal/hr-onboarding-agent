@@ -3,52 +3,28 @@ from __future__ import annotations
 import json
 from typing import Any, Iterator
 
-from agent.answering import INSUFFICIENT_CONTEXT_MARKER
-
-ANSWER_NODE = "generate_answer"
 CHAT_NODE = "reply_in_chat"
-# Only these nodes write text for the employee; other model calls (like routing) stay hidden.
-STREAMED_NODES = frozenset({ANSWER_NODE, CHAT_NODE})
+# Only small talk streams as it's written. Answers from the documents are checked before the
+# employee sees them, so they arrive whole and the web app types them out.
+STREAMED_NODES = frozenset({CHAT_NODE})
+NOT_FOUND_STATUS = {"stage": "not_found", "label": "Couldn't find this in the HR documents"}
 
 
 def sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-class MarkerGate:
-    """Holds streamed tokens back while they could still be the INSUFFICIENT_CONTEXT marker."""
-
-    def __init__(self, marker: str = INSUFFICIENT_CONTEXT_MARKER) -> None:
-        self._marker = marker
-        self._buffer = ""
-        self._open = False
-
-    def feed(self, text: str) -> str:
-        if self._open:
-            return text
-        self._buffer += text
-        candidate = self._buffer.lstrip()
-        if self._marker.startswith(candidate) or candidate.startswith(self._marker):
-            return ""
-        self._open = True
-        released, self._buffer = self._buffer, ""
-        return released
-
-
 def stream_agent(graph: Any, state: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
-    """Runs the graph and yields (event, payload) pairs: status updates, answer tokens,
+    """Runs the graph and yields (event, payload) pairs: status updates, chat tokens,
     and a final "done" payload with the full result."""
     result = dict(state)
-    gate = MarkerGate()
 
     for mode, chunk in graph.stream(state, stream_mode=["updates", "messages"]):
         if mode == "messages":
             message, metadata = chunk
             content = getattr(message, "content", "")
             if metadata.get("langgraph_node") in STREAMED_NODES and isinstance(content, str) and content:
-                released = gate.feed(content)
-                if released:
-                    yield "token", {"text": released}
+                yield "token", {"text": content}
             continue
 
         for node, update in chunk.items():
@@ -79,10 +55,23 @@ def _status_for(node: str, update: dict[str, Any]) -> dict[str, Any] | None:
 
     if node == "score_confidence":
         if update.get("confidence_label") == "low":
-            return {"stage": "not_found", "label": "Couldn't find this in the HR documents"}
-        return {"stage": "checking", "label": "Checking these sections for an answer"}
+            return NOT_FOUND_STATUS
+        return {"stage": "writing", "label": "Writing an answer from these sections"}
 
-    if node == ANSWER_NODE and update.get("answer_declined"):
-        return {"stage": "not_found", "label": "Couldn't find this in the HR documents"}
+    if node == "generate_answer":
+        if update.get("answer_declined"):
+            return NOT_FOUND_STATUS
+        return {"stage": "verifying", "label": "Double-checking it against the documents"}
+
+    if node == "check_answer":
+        check = update.get("answer_check") or {}
+        if update.get("answer_declined"):
+            return NOT_FOUND_STATUS
+        if check.get("unsupported_claims") or check.get("missing_details"):
+            return {"stage": "revising", "label": "Fixing details the first draft got wrong or left out"}
+        return None
+
+    if node == "revise_answer" and update.get("answer_declined"):
+        return NOT_FOUND_STATUS
 
     return None

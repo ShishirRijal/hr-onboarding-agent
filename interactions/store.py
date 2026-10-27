@@ -123,6 +123,7 @@ class InteractionStore:
                 "message_route": state.get("message_route", {}),
                 "retrieval": state.get("retrieval_debug", {}),
                 "confidence": state.get("confidence_debug", {}),
+                "answer_check": state.get("answer_check"),
             },
         )
 

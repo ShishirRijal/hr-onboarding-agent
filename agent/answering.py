@@ -29,6 +29,8 @@ def generate_grounded_answer(
     *,
     history: Sequence[ConversationTurn] = (),
     employee_context: EmployeeContext | None = None,
+    draft: str | None = None,
+    feedback: str | None = None,
     llm: Any | None = None,
     model: str = DEFAULT_ANSWER_MODEL,
 ) -> str:
@@ -36,7 +38,11 @@ def generate_grounded_answer(
         return NO_ANSWER_MESSAGE
 
     client = llm or _load_default_llm(model=model)
-    response = client.invoke(_build_messages(question, chunks, history, employee_context or {}))
+    messages = _build_messages(question, chunks, history, employee_context or {})
+    if draft and feedback:
+        # A rewrite after review: the model sees its draft and what to fix, and answers again.
+        messages += [("ai", draft), ("human", feedback)]
+    response = client.invoke(messages)
     content = getattr(response, "content", response)
     return str(content).strip()
 
