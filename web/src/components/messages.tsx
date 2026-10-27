@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
+import { hasCitations, linkCitations } from "@/lib/citations";
 import { documentTitle, sectionLabel } from "@/lib/documents";
 import { formatDateTime } from "@/lib/format";
-import type { AssistantMessage, HrReply, Source, UserMessage } from "@/lib/types";
+import type { AssistantMessage, HrReply, Rating, Source, UserMessage } from "@/lib/types";
 import { usePacedCount, useSmoothText } from "@/lib/use-reveal";
 import { AssistantMark } from "./assistant-mark";
+import { ThumbDownIcon, ThumbUpIcon } from "./icons";
 import { ProgressSteps } from "./progress-steps";
 
 export function UserBubble({ message }: { message: UserMessage }) {
@@ -28,6 +30,7 @@ export function AssistantReply({
   openChunkId,
   onRetry,
   onChooseHr,
+  onRate,
   onOpenSource,
 }: {
   message: AssistantMessage;
@@ -35,6 +38,7 @@ export function AssistantReply({
   openChunkId: string | null;
   onRetry: () => void;
   onChooseHr: (askHr: boolean) => void;
+  onRate: (rating: Rating | null, comment?: string) => Promise<boolean>;
   onOpenSource: (source: Source, opener: HTMLElement) => void;
 }) {
   // Replies loaded from history appear as they are; only replies written now are animated.
@@ -66,6 +70,7 @@ export function AssistantReply({
             openChunkId={openChunkId}
             onRetry={onRetry}
             onChooseHr={onChooseHr}
+            onRate={onRate}
             onOpenSource={onOpenSource}
           />
         )}
@@ -81,6 +86,7 @@ function ReplyBody({
   openChunkId,
   onRetry,
   onChooseHr,
+  onRate,
   onOpenSource,
 }: {
   message: AssistantMessage;
@@ -89,6 +95,7 @@ function ReplyBody({
   openChunkId: string | null;
   onRetry: () => void;
   onChooseHr: (askHr: boolean) => void;
+  onRate: (rating: Rating | null, comment?: string) => Promise<boolean>;
   onOpenSource: (source: Source, opener: HTMLElement) => void;
 }) {
   if (message.status === "error") {
@@ -111,13 +118,47 @@ function ReplyBody({
     return <NotFound message={message} text={text} typing={typing} onChooseHr={onChooseHr} />;
   }
 
-  // Answers mark where each fact comes from with [1], [2], ...; older ones list their sources below.
-  const cited = CITATION.test(message.text);
+  const done = !typing && message.status === "done";
+  return (
+    <div>
+      <AnswerText
+        text={text}
+        fullText={message.text}
+        sources={message.sources}
+        typing={typing}
+        openChunkId={openChunkId}
+        onOpenSource={onOpenSource}
+      />
+      {done && message.interactionId && (
+        <FeedbackBar rating={message.feedback ?? null} onRate={onRate} />
+      )}
+    </div>
+  );
+}
+
+// An answer with its citations as numbers that open their source. Answers without
+// citations, from before they were added, list their sources underneath instead.
+export function AnswerText({
+  text,
+  fullText = text,
+  sources,
+  typing = false,
+  openChunkId,
+  onOpenSource,
+}: {
+  text: string;
+  // The whole answer, while `text` is still typing out.
+  fullText?: string;
+  sources: Source[];
+  typing?: boolean;
+  openChunkId: string | null;
+  onOpenSource: (source: Source, opener: HTMLElement) => void;
+}) {
   const components: Components = {
     a({ href, children }) {
       const number = Number(href?.match(/^#source-(\d+)$/)?.[1]);
       if (!number) return <a href={href}>{children}</a>;
-      const source = message.sources[number - 1];
+      const source = sources[number - 1];
       return (
         <Citation
           number={number}
@@ -130,25 +171,118 @@ function ReplyBody({
   };
 
   return (
-    <div>
+    <>
       <div className={`answer ${typing ? "is-typing" : ""}`}>
         <Markdown components={components}>{linkCitations(text, typing)}</Markdown>
       </div>
-      {!cited && !typing && message.status === "done" && message.sources.length > 0 && (
-        <SourceList sources={message.sources} openChunkId={openChunkId} onOpen={onOpenSource} />
+      {!hasCitations(fullText) && !typing && sources.length > 0 && (
+        <SourceList sources={sources} openChunkId={openChunkId} onOpen={onOpenSource} />
       )}
-    </div>
+    </>
   );
 }
 
-// [n] cites message.sources[n - 1]. A "[n](...)" is a Markdown link, not a citation.
-const CITATION = /\[(\d+)\](?!\()/;
+// Thumbs up or down under an answer. A thumbs down asks what was wrong; both go to HR's
+// answer review without the employee's name.
+function FeedbackBar({
+  rating,
+  onRate,
+}: {
+  rating: Rating | null;
+  onRate: (rating: Rating | null, comment?: string) => Promise<boolean>;
+}) {
+  const [asking, setAsking] = useState(false);
+  const [comment, setComment] = useState("");
+  const [sending, setSending] = useState(false);
+  const [thanked, setThanked] = useState(false);
+  const commentId = useId();
 
-// Citations become links so Markdown keeps them inline, in lists and bold text alike.
-function linkCitations(text: string, typing: boolean): string {
-  // While the answer types out, a half-written "[1" would flash up as text.
-  const shown = typing ? text.replace(/\[\d*$/, "") : text;
-  return shown.replace(new RegExp(CITATION.source, "g"), (_, number: string) => `[${number}](#source-${number})`);
+  function choose(next: Rating) {
+    // Choosing the same thumb again takes it back.
+    const value = rating === next ? null : next;
+    setAsking(value === "down");
+    setThanked(value === "up");
+    void onRate(value);
+  }
+
+  async function sendComment(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSending(true);
+    const saved = await onRate("down", comment.trim());
+    setSending(false);
+    if (saved) {
+      setAsking(false);
+      setThanked(true);
+    }
+  }
+
+  const button = "rounded-lg p-1.5 transition-colors hover:bg-muted hover:text-ink";
+  return (
+    <div className="step-in mt-2">
+      <div className="flex items-center gap-1 text-ink-soft">
+        <button
+          type="button"
+          onClick={() => choose("up")}
+          aria-pressed={rating === "up"}
+          aria-label="Helpful"
+          title="Helpful"
+          className={`${button} ${rating === "up" ? "bg-brand-wash text-brand hover:bg-brand-wash hover:text-brand" : ""}`}
+        >
+          <ThumbUpIcon className="size-[1.125rem]" />
+        </button>
+        <button
+          type="button"
+          onClick={() => choose("down")}
+          aria-pressed={rating === "down"}
+          aria-label="Not helpful"
+          title="Not helpful"
+          className={`${button} ${rating === "down" ? "bg-muted text-ink" : ""}`}
+        >
+          <ThumbDownIcon className="size-[1.125rem]" />
+        </button>
+        {thanked && !asking && (
+          <p role="status" className="ml-1 text-sm">
+            Thanks. HR reviews answers without your name to improve them.
+          </p>
+        )}
+      </div>
+
+      {asking && (
+        <form onSubmit={sendComment} className="mt-2 max-w-md">
+          <label htmlFor={commentId} className="text-sm font-semibold text-ink">
+            What was wrong? <span className="font-normal text-ink-soft">Optional</span>
+          </label>
+          <textarea
+            id={commentId}
+            rows={2}
+            maxLength={1000}
+            value={comment}
+            onChange={(event) => setComment(event.target.value)}
+            className="mt-1.5 w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm leading-relaxed text-ink focus-visible:border-brand-bright focus-visible:ring-4 focus-visible:ring-brand-bright/15 focus-visible:outline-none"
+          />
+          <div className="mt-2 flex gap-2">
+            <button
+              type="submit"
+              disabled={sending || !comment.trim()}
+              className="rounded-full bg-brand px-3.5 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-brand-deep disabled:bg-muted disabled:text-ink-faint"
+            >
+              {sending ? "Sending…" : "Send feedback"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAsking(false);
+                setThanked(true);
+              }}
+              className="rounded-full px-3.5 py-1.5 text-sm font-semibold text-ink-soft hover:bg-muted hover:text-ink"
+            >
+              Skip
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
 }
 
 function Citation({
@@ -265,7 +399,7 @@ function HrReplyCard({ reply }: { reply: HrReply }) {
   );
 }
 
-function SourceList({
+export function SourceList({
   sources,
   openChunkId,
   onOpen,

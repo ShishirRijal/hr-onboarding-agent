@@ -78,6 +78,19 @@ class HRRequestResponse(BaseModel):
     message: str
 
 
+class FeedbackRequest(BaseModel):
+    # None takes a rating back.
+    rating: Literal["up", "down"] | None
+    # What was wrong, with a thumbs down.
+    comment: str | None = Field(default=None, max_length=1000)
+
+
+class FeedbackResponse(BaseModel):
+    interaction_id: str
+    feedback: str | None
+    feedback_comment: str | None
+
+
 class ChatSessionSummary(BaseModel):
     session_id: str
     title: str
@@ -99,6 +112,8 @@ class SessionMessage(BaseModel):
     hr_answer: str | None = None
     hr_answered_by: str | None = None
     hr_answered_at: UtcDatetime | None = None
+    feedback: str | None = None
+    feedback_comment: str | None = None
 
 
 class Asker(BaseModel):
@@ -141,6 +156,51 @@ class HRAnswerRequest(BaseModel):
     applies_to: Literal["everyone", "country"]
 
 
+# Matches interactions.store.REVIEW_FILTERS.
+ReviewFilter = Literal["all", "unhelpful", "helpful", "not_answered", "reviewed"]
+
+
+class ReviewItem(BaseModel):
+    """A logged question in the answer review. Anonymous: only the asker's country is shown."""
+
+    interaction_id: str
+    asked_at: UtcDatetime
+    question: str
+    answer: str
+    answered: bool
+    # Greetings and thanks, answered without the documents.
+    small_talk: bool
+    country: str | None = None
+    escalation_status: str | None = None
+    feedback: str | None = None
+    feedback_comment: str | None = None
+    review_verdict: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: UtcDatetime | None = None
+
+
+class ReviewPage(BaseModel):
+    items: list[ReviewItem]
+    total: int
+
+
+class ReviewDetail(ReviewItem):
+    sources: list[Source]
+    confidence_label: str
+    # Why the assistant couldn't answer, for questions it didn't.
+    reason: str | None = None
+    # HR's reply from the inbox, when the employee sent the question to HR.
+    hr_answer: str | None = None
+    review_answer: str | None = None
+    earlier_turns: list[ConversationTurnOut]
+
+
+class ReviewRequest(BaseModel):
+    verdict: Literal["correct", "corrected"]
+    # The answer HR would have given, with "corrected".
+    answer: str | None = Field(default=None, max_length=5000)
+
+
 class TopicCount(BaseModel):
     topic: str
     count: int
@@ -149,5 +209,7 @@ class TopicCount(BaseModel):
 class HROverview(BaseModel):
     open_questions: int
     answered_this_week: int
+    # Answers employees marked unhelpful that HR hasn't reviewed yet.
+    unhelpful_to_review: int
     common_topics: list[TopicCount]
     topics_since: UtcDatetime

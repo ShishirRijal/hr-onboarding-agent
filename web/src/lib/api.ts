@@ -2,11 +2,17 @@ import type {
   AnswerScope,
   ChatResponse,
   ChatSessionSummary,
+  FeedbackResponse,
   HrOverview,
   HrQuestion,
   HrQuestionDetail,
   HrRequestResponse,
   ProgressStep,
+  Rating,
+  ReviewDetail,
+  ReviewFilter,
+  ReviewPage,
+  ReviewVerdict,
   SessionMessage,
   SourcePassage,
   User,
@@ -139,6 +145,14 @@ export function requestHr(interactionId: string, askHr: boolean): Promise<HrRequ
   });
 }
 
+// null takes a rating back.
+export function sendFeedback(interactionId: string, rating: Rating | null, comment?: string): Promise<FeedbackResponse> {
+  return request<FeedbackResponse>(`/interactions/${encodeURIComponent(interactionId)}/feedback`, {
+    method: "POST",
+    body: JSON.stringify({ rating, comment: comment ?? null }),
+  });
+}
+
 export function fetchSessions(): Promise<ChatSessionSummary[]> {
   return request<ChatSessionSummary[]>("/sessions");
 }
@@ -180,5 +194,20 @@ export function answerHrQuestion(
   return request<HrQuestionDetail>(`/hr/questions/${encodeURIComponent(interactionId)}/answer`, {
     method: "POST",
     body: JSON.stringify({ answer, applies_to: appliesTo }),
+  });
+}
+
+export function fetchReviewPage(show: ReviewFilter, offset = 0): Promise<ReviewPage> {
+  return request<ReviewPage>(`/hr/review?show=${show}&offset=${offset}`);
+}
+
+export function fetchReviewDetail(interactionId: string): Promise<ReviewDetail> {
+  return request<ReviewDetail>(`/hr/review/${encodeURIComponent(interactionId)}`);
+}
+
+export function saveReview(interactionId: string, verdict: ReviewVerdict, answer?: string): Promise<ReviewDetail> {
+  return request<ReviewDetail>(`/hr/review/${encodeURIComponent(interactionId)}`, {
+    method: "POST",
+    body: JSON.stringify({ verdict, answer: answer ?? null }),
   });
 }

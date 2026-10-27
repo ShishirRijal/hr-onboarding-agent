@@ -11,15 +11,16 @@ from typing import Annotated, Any, Iterator, Literal
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from accounts import ROLE_HR, SESSION_LIFETIME, User, UserStore, seed_demo_users
 from agent.escalation import HR_REQUEST_DECLINED_MESSAGE, hr_request_sent_message
-from interactions import HR_ANSWERED, HR_OFFERED, HR_REQUESTED, Interaction
+from agent.conversation import MESSAGE_CHAT
+from interactions import HR_ANSWERED, HR_OFFERED, HR_REQUESTED, REVIEW_CORRECTED, Interaction
 from interactions.digest import DEFAULT_DIGEST_TIMEZONE, DigestSettings, schedule_daily_digest
-from interactions.inbox import common_topics, documents_checked, reason_text
+from interactions.inbox import common_topics, documents_checked, reason_text, redact_names
 from retrieval.settings import SHARED_COUNTRY
 
 from .schemas import (
@@ -28,12 +29,19 @@ from .schemas import (
     ChatResponse,
     ChatSessionSummary,
     ConversationTurnOut,
+    FeedbackRequest,
+    FeedbackResponse,
     HRAnswerRequest,
     HROverview,
     HRQuestion,
     HRQuestionDetail,
     HRRequest,
     HRRequestResponse,
+    ReviewDetail,
+    ReviewFilter,
+    ReviewItem,
+    ReviewPage,
+    ReviewRequest,
     SessionMessage,
     SignInRequest,
     SourcePassage,
@@ -60,6 +68,8 @@ CHAT_NOT_FOUND = "Chat not found."
 QUESTION_NOT_FOUND = "Question not found."
 ALREADY_ANSWERED = "This question has already been answered."
 COUNTRY_UNKNOWN = "The employee's country isn't known, so the answer can only be added for everyone."
+ONLY_ANSWERS_RATED = "Only answers can be rated."
+CORRECTION_NEEDED = "Write the answer you'd give before saving it."
 KNOWLEDGE_UNAVAILABLE = "The answer couldn't be added to the knowledge base, so it wasn't sent. Try again."
 
 
@@ -209,6 +219,25 @@ def create_app(
             message=hr_request_sent_message(user.email) if request.ask_hr else HR_REQUEST_DECLINED_MESSAGE,
         )
 
+    @app.post("/interactions/{interaction_id}/feedback", response_model=FeedbackResponse)
+    def feedback(
+        interaction_id: str, request: FeedbackRequest, http_request: Request, user: CurrentUser
+    ) -> FeedbackResponse:
+        store = http_request.app.state.store
+        asked = store.get(interaction_id)
+        if asked is None or asked.user_id != user.id:
+            raise HTTPException(status_code=404, detail=QUESTION_NOT_FOUND)
+        comment = (request.comment or "").strip() or None
+        try:
+            interaction = store.record_feedback(interaction_id, rating=request.rating, comment=comment)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=ONLY_ANSWERS_RATED) from exc
+        return FeedbackResponse(
+            interaction_id=interaction.id,
+            feedback=interaction.feedback,
+            feedback_comment=interaction.feedback_comment,
+        )
+
     @app.get("/sessions", response_model=list[ChatSessionSummary])
     def sessions(http_request: Request, user: CurrentUser) -> list[ChatSessionSummary]:
         return [
@@ -241,6 +270,8 @@ def create_app(
                 hr_answer=interaction.hr_answer,
                 hr_answered_by=interaction.hr_answered_by,
                 hr_answered_at=interaction.hr_answered_at,
+                feedback=interaction.feedback,
+                feedback_comment=interaction.feedback_comment,
             )
             for interaction in store.list_session(session_id)
         ]
@@ -272,6 +303,7 @@ def create_app(
         return HROverview(
             open_questions=len(store.hr_questions(HR_REQUESTED)),
             answered_this_week=store.count_hr_answered_since(_week_start(now)),
+            unhelpful_to_review=store.count_unhelpful_to_review(),
             common_topics=[
                 TopicCount(topic=topic, count=count)
                 for topic, count in common_topics(store.unanswered_since(topics_since))
@@ -326,6 +358,39 @@ def create_app(
                 chunk_id=chunk_id,
             )
         return _hr_question_detail(answered, app_state.store, app_state.users)
+
+    @app.get("/hr/review", response_model=ReviewPage, dependencies=[Depends(hr_user)])
+    def review_page(
+        http_request: Request,
+        show: ReviewFilter = "all",
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=100)] = 30,
+    ) -> ReviewPage:
+        items, total = http_request.app.state.store.review_page(show, offset=offset, limit=limit)
+        return ReviewPage(items=[_review_item(item) for item in items], total=total)
+
+    @app.get("/hr/review/{interaction_id}", response_model=ReviewDetail, dependencies=[Depends(hr_user)])
+    def review_detail(interaction_id: str, http_request: Request) -> ReviewDetail:
+        store = http_request.app.state.store
+        interaction = store.get(interaction_id)
+        if interaction is None:
+            raise HTTPException(status_code=404, detail=QUESTION_NOT_FOUND)
+        return _review_detail(interaction, store)
+
+    @app.post("/hr/review/{interaction_id}", response_model=ReviewDetail)
+    def review_answer(
+        interaction_id: str, request: ReviewRequest, http_request: Request, user: HRUser
+    ) -> ReviewDetail:
+        store = http_request.app.state.store
+        answer = (request.answer or "").strip() or None
+        if request.verdict == REVIEW_CORRECTED and answer is None:
+            raise HTTPException(status_code=422, detail=CORRECTION_NEEDED)
+        interaction = store.record_review(
+            interaction_id, verdict=request.verdict, answer=answer, reviewed_by=user.name, reviewed_by_id=user.id
+        )
+        if interaction is None:
+            raise HTTPException(status_code=404, detail=QUESTION_NOT_FOUND)
+        return _review_detail(interaction, store)
 
     return app
 
@@ -428,16 +493,59 @@ def _hr_question(interaction: Interaction, users: UserStore) -> HRQuestion:
 
 
 def _hr_question_detail(interaction: Interaction, store: Any, users: UserStore) -> HRQuestionDetail:
+    return HRQuestionDetail(
+        **_hr_question(interaction, users).model_dump(),
+        documents_checked=documents_checked(interaction.hr_handoff or {}),
+        earlier_turns=_earlier_turns(interaction, store),
+    )
+
+
+def _earlier_turns(interaction: Interaction, store: Any) -> list[ConversationTurnOut]:
     earlier: list[ConversationTurnOut] = []
     if interaction.session_id:
         for turn in store.list_session(interaction.session_id):
             if turn.id == interaction.id:
                 break
             earlier.append(ConversationTurnOut(question=turn.question, answer=turn.hr_answer or turn.answer))
-    return HRQuestionDetail(
-        **_hr_question(interaction, users).model_dump(),
-        documents_checked=documents_checked(interaction.hr_handoff or {}),
-        earlier_turns=earlier,
+    return earlier
+
+
+def _review_item(interaction: Interaction) -> ReviewItem:
+    # Nothing that says who asked: no name, email, job or office, only the country whose
+    # rules applied, and their name taken out of what was said. Contact details stay in the
+    # HR inbox, for questions sent there.
+    context = interaction.employee_context or {}
+    route = (interaction.debug or {}).get("message_route") or {}
+    return ReviewItem(
+        interaction_id=interaction.id,
+        asked_at=interaction.created_at,
+        question=redact_names(interaction.question, context),
+        answer=redact_names(interaction.answer, context),
+        answered=bool(interaction.answered),
+        small_talk=route.get("kind") == MESSAGE_CHAT,
+        country=context.get("employee_country") or context.get("office_country"),
+        escalation_status=interaction.escalation_status,
+        feedback=interaction.feedback,
+        feedback_comment=redact_names(interaction.feedback_comment or "", context) or None,
+        review_verdict=interaction.review_verdict,
+        reviewed_by=interaction.reviewed_by,
+        reviewed_at=interaction.reviewed_at,
+    )
+
+
+def _review_detail(interaction: Interaction, store: Any) -> ReviewDetail:
+    context = interaction.employee_context or {}
+    return ReviewDetail(
+        **_review_item(interaction).model_dump(),
+        sources=interaction.sources or [],
+        confidence_label=interaction.confidence_label,
+        reason=None if interaction.answered else reason_text(interaction.escalation_reason),
+        hr_answer=redact_names(interaction.hr_answer, context) if interaction.hr_answer else None,
+        review_answer=interaction.review_answer,
+        earlier_turns=[
+            ConversationTurnOut(question=redact_names(turn.question, context), answer=redact_names(turn.answer, context))
+            for turn in _earlier_turns(interaction, store)
+        ],
     )
 
 

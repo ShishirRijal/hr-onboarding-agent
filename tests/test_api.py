@@ -122,6 +122,8 @@ class FakeStore:
             hr_answer=None,
             hr_answered_by=None,
             hr_answered_at=None,
+            feedback=None,
+            feedback_comment=None,
         )
 
     def get(self, interaction_id):

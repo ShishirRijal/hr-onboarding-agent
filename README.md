@@ -208,6 +208,7 @@ Every route except `GET /health` and `POST /auth/sign-in` needs a signed-in sess
 - `POST /chat/stream` answers a question as server-sent events: `status` updates while it searches, `token` events as the answer is written, then `done` with the full answer and sources
 - `POST /chat` answers in one response: `{"message": "...", "session_id": "..."}`. Where the employee works (country, office, department, role) comes from their account, not the request
 - `POST /interactions/{interaction_id}/hr-request` records whether the employee wants an unanswered question sent to HR: `{"ask_hr": true}`
+- `POST /interactions/{interaction_id}/feedback` rates one of the employee's own answers: `{"rating": "up" | "down" | null, "comment": "..."}`; a comment is kept only with a thumbs down, and `null` takes the rating back
 - `GET /sessions` lists the signed-in user's chats, newest first, with the number of unread HR replies in each
 - `GET /sessions/{session_id}/messages` returns one of the user's chats, including HR's replies, and marks those replies as read. Other users' chats answer `404`
 - `GET /sources/{chunk_id}` returns the source document of a cited chunk with the chunk's character span, so the UI can open it with that part highlighted
@@ -215,14 +216,17 @@ Every route except `GET /health` and `POST /auth/sign-in` needs a signed-in sess
 
 HR team only (`403` for employees):
 
-- `GET /hr/overview`: open questions, questions answered this week, and the most common unanswered topics of the last 30 days
+- `GET /hr/overview`: open questions, questions answered this week, answers marked unhelpful that haven't been reviewed, and the most common unanswered topics of the last 30 days
 - `GET /hr/questions?status=requested|answered`: questions sent to HR, with who asked
 - `GET /hr/questions/{interaction_id}`: one question with why the assistant couldn't answer, the documents it checked, and the earlier turns of the chat
 - `POST /hr/questions/{interaction_id}/answer`: `{"answer": "...", "applies_to": "country" | "everyone"}` sends HR's answer to the employee and adds it to the knowledge base
+- `GET /hr/review?show=all|unhelpful|helpful|not_answered|reviewed&offset=0&limit=30`: every logged question for the answer review, newest first, with the total. Anonymous: only the asker's country, with their name taken out of the question and answer
+- `GET /hr/review/{interaction_id}`: one question with the answer's sources, the employee's rating, HR's review and the earlier turns of the chat
+- `POST /hr/review/{interaction_id}`: `{"verdict": "correct" | "corrected", "answer": "..."}` saves HR's review; `corrected` needs the answer HR would have given. Reviewing again replaces it
 
 Every question is logged to `data/interactions.db` with the user who asked (`user_id`). Questions the documents can't answer have `answered = 0` and `escalation_status` set to `offered`, then `requested` or `declined` once the employee chooses, or `dismissed` if they ask something else without choosing; the ones sent to HR also have `escalated = 1`, and become `answered` when HR replies from the HR inbox (`hr_answer`, `hr_answered_by`, `hr_answered_at`).
 
-Declined and dismissed questions stay anonymous. Questions sent to HR also store who asked (`employee_name`, `employee_email`), taken from the signed-in account, so HR can reply.
+Declined and dismissed questions don't store a name or email. Questions sent to HR also store who asked (`employee_name`, `employee_email`), taken from the signed-in account, so HR can reply.
 
 **HR digest email.** Once a day at `HR_DIGEST_TIME` (default 18:00, `Europe/Tallinn`) the API emails `HR_DIGEST_TO` every question sent to HR since the last digest: the question, who asked and their email, where they work, why the assistant couldn't answer, which documents it checked, and a link to answer it in the HR inbox (`HR_INBOX_URL`). Questions HR already answered in the inbox are left out. Nothing is sent on days without new questions. Each question is marked with `hr_notified_at` once the email is accepted, so a failed send is retried next time and nothing is sent twice. SMTP settings are in `.env.example`; set `HR_DIGEST_TIME=` (empty) to turn it off. To send it now, or from cron instead:
 
@@ -275,6 +279,14 @@ HR writes an answer and chooses who it applies to: employees in the asker's coun
 3. shows the answer in the employee's chat
 
 The answered list keeps every question HR has answered. Answers cited by the assistant open in the source viewer like any other source.
+
+Employees rate answers with a thumbs up or down under each one, and a thumbs down asks what was wrong. The **answer review** lists every question employees have asked the assistant, newest first, filtered by all, marked unhelpful, marked helpful, not answered, or reviewed. It doesn't say who asked: only the country whose rules applied, with the employee's name replaced by `[name]` in what was said (answers greet employees by first name). The sidebar counts answers marked unhelpful that haven't been reviewed yet. For each answer HR can mark it right, or write the answer they would have given. Reviews are kept to test and improve the assistant: the employee doesn't see them, and unlike inbox answers they aren't added to the knowledge base. The chat tells employees that HR reviews chats without names.
+
+`scripts/export_examples.py` writes every rated or reviewed answer to `data/exports/examples.jsonl` (the chat before it, the answer and its sources, the rating and comment, HR's review), and the answers HR rewrote to `data/exports/preference_pairs.jsonl` as preference pairs in OpenAI's DPO fine-tuning format, HR's answer preferred over the assistant's. Both are anonymous in the same way as the review.
+
+```bash
+PYTHONPATH=. poetry run python scripts/export_examples.py
+```
 
 ### Command line
 

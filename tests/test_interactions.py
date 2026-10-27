@@ -175,3 +175,66 @@ def test_users_chats_are_listed_newest_first_with_unread_hr_replies(tmp_path: Pa
 
     store.mark_hr_answers_read("s-1")
     assert store.list_user_sessions("u-1")[0].unread_hr_replies == 0
+
+
+def test_feedback_is_kept_on_answers_with_a_comment_only_for_a_thumbs_down(tmp_path: Path) -> None:
+    store = InteractionStore(f"sqlite:///{tmp_path / 'interactions.db'}")
+    answered_id = store.log(_state("How much annual leave do I get?", session_id="s-1", answered=True))
+    unanswered_id = store.log(_state("Can I bring my dog?", session_id="s-1", answered=False))
+
+    down = store.record_feedback(answered_id, rating="down", comment="It's 28 days, not 25.")
+    assert (down.feedback, down.feedback_comment) == ("down", "It's 28 days, not 25.")
+    assert down.feedback_at is not None
+    up = store.record_feedback(answered_id, rating="up", comment="ignored")
+    assert (up.feedback, up.feedback_comment) == ("up", None)
+    cleared = store.record_feedback(answered_id, rating=None)
+    assert (cleared.feedback, cleared.feedback_at) == (None, None)
+    with pytest.raises(ValueError):
+        store.record_feedback(unanswered_id, rating="down")
+    assert store.record_feedback("missing", rating="up") is None
+
+
+def test_review_lists_questions_newest_first_by_kind(tmp_path: Path) -> None:
+    store = InteractionStore(f"sqlite:///{tmp_path / 'interactions.db'}")
+    first = store.log(_state("Leave?", session_id="s-1", answered=True))
+    second = store.log(_state("Dog?", session_id="s-2", answered=False))
+    third = store.log(_state("Parking?", session_id="s-3", answered=True))
+    store.record_feedback(first, rating="down")
+    store.record_feedback(third, rating="up")
+
+    def ids(show: str) -> list[str]:
+        return [interaction.id for interaction in store.review_page(show)[0]]
+
+    assert ids("all") == [third, second, first]
+    assert ids("unhelpful") == [first]
+    assert ids("helpful") == [third]
+    assert ids("not_answered") == [second]
+    page, total = store.review_page("all", offset=1, limit=1)
+    assert ([interaction.id for interaction in page], total) == ([second], 3)
+    assert store.count_unhelpful_to_review() == 1
+
+    store.record_review(first, verdict="corrected", answer="28 days.", reviewed_by="Marju Ilves", reviewed_by_id="hr-1")
+    assert ids("reviewed") == [first]
+    assert store.count_unhelpful_to_review() == 0
+    assert [interaction.id for interaction in store.rated_or_reviewed()] == [first, third]
+
+
+def test_reviewing_again_replaces_the_review(tmp_path: Path) -> None:
+    store = InteractionStore(f"sqlite:///{tmp_path / 'interactions.db'}")
+    interaction_id = store.log(_state("Leave?", session_id="s-1", answered=True))
+
+    store.record_review(interaction_id, verdict="corrected", answer="28 days.", reviewed_by="Marju", reviewed_by_id="hr-1")
+    review = store.record_review(interaction_id, verdict="correct", answer="ignored", reviewed_by="Marju", reviewed_by_id="hr-1")
+
+    assert (review.review_verdict, review.review_answer) == ("correct", None)
+    assert store.record_review("missing", verdict="correct", answer=None, reviewed_by="M", reviewed_by_id="hr-1") is None
+
+
+def test_redact_names_takes_out_the_full_and_first_name() -> None:
+    from interactions.inbox import redact_names
+
+    context = {"employee_name": "Alex Rinne"}
+    assert redact_names("Hi Alex, ALEX RINNE asked. Alexander isn't them.", context) == (
+        "Hi [name], [name] asked. Alexander isn't them."
+    )
+    assert redact_names("No name here.", {}) == "No name here."

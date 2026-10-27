@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, fetchSessionMessages, requestHr, streamMessage } from "@/lib/api";
+import { ApiError, fetchSessionMessages, requestHr, sendFeedback, streamMessage } from "@/lib/api";
 import { useAppState } from "@/lib/app-state";
-import type { AssistantMessage, ChatMessage, HrReply, ProgressStep, SessionMessage, Source } from "@/lib/types";
+import type { AssistantMessage, ChatMessage, HrReply, ProgressStep, Rating, SessionMessage, Source } from "@/lib/types";
 import { Composer } from "./composer";
 import { EmptyState } from "./empty-state";
 import { AssistantReply, UserBubble } from "./messages";
@@ -28,6 +28,8 @@ function historyToMessages(history: SessionMessage[]): ChatMessage[] {
       interactionId: item.interaction_id,
       hrStatus: item.escalation_status ?? undefined,
       hrReply: hrReplyOf(item),
+      feedback: item.feedback,
+      feedbackComment: item.feedback_comment,
     },
   ]);
 }
@@ -239,6 +241,20 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
     }
   }
 
+  // Shown straight away; put back if it couldn't be saved. Resolves to whether it was saved.
+  async function rate(message: AssistantMessage, rating: Rating | null, comment?: string): Promise<boolean> {
+    if (!message.interactionId) return false;
+    updateAssistant(message.id, { feedback: rating });
+    try {
+      const saved = await sendFeedback(message.interactionId, rating, comment);
+      updateAssistant(message.id, { feedback: saved.feedback, feedbackComment: saved.feedback_comment });
+      return true;
+    } catch {
+      updateAssistant(message.id, { feedback: message.feedback ?? null });
+      return false;
+    }
+  }
+
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
@@ -260,6 +276,7 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
                         openChunkId={openSource?.messageId === message.id ? openSource.source.chunk_id : null}
                         onRetry={() => retry(message)}
                         onChooseHr={(askHr) => void chooseHr(message, askHr)}
+                        onRate={(rating, comment) => rate(message, rating, comment)}
                         onOpenSource={(source, opener) => {
                           const alreadyOpen =
                             openSource?.messageId === message.id && openSource.source.chunk_id === source.chunk_id;
@@ -279,7 +296,7 @@ export function ChatView({ sessionId }: { sessionId: string | null }) {
           <Composer disabled={busy || historyState !== "ready"} onSend={send} />
           <p className="mt-2 text-center text-xs text-ink-soft">
             Answers come from NordTech policy documents. Check the sources before acting on anything
-            important.
+            important. HR reviews chats without names to improve answers.
           </p>
         </div>
       </div>
