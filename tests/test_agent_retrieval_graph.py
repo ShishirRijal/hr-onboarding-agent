@@ -98,6 +98,10 @@ def fake_answer_generator(question, chunks, **_):
     return str(chunks[0]["text"])
 
 
+def approve_answer(question, chunks, answer, **_):
+    return {"answers_question": True, "unsupported_claims": [], "missing_details": [], "revised": False}
+
+
 def route_to_hr(question, history):
     del history
     return {"kind": "hr", "search_query": question}
@@ -116,6 +120,7 @@ def test_retrieval_graph_resolves_country_from_employee_context() -> None:
         retriever=retriever,
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
+        answer_checker=approve_answer,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -158,6 +163,7 @@ def test_retrieval_graph_prefers_explicit_override() -> None:
         retriever=retriever,
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
+        answer_checker=approve_answer,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -192,6 +198,7 @@ def test_retrieval_graph_ignores_remote_office_country_for_filtering() -> None:
         retriever=retriever,
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
+        answer_checker=approve_answer,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -228,6 +235,7 @@ def test_retrieval_graph_uses_injected_answer_generator() -> None:
         retriever=retriever,
         answer_generator=answer_generator,
         message_router=route_to_hr,
+        answer_checker=approve_answer,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -267,6 +275,7 @@ def test_retrieval_graph_returns_low_confidence_without_chunks() -> None:
         engine,
         retriever=retriever,
         message_router=route_to_hr,
+        answer_checker=approve_answer,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -371,6 +380,7 @@ def test_retrieval_graph_deduplicates_answer_sources_by_location() -> None:
         retriever=retriever,
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
+        answer_checker=approve_answer,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -435,6 +445,7 @@ def test_retrieval_graph_caps_confidence_below_perfect_score() -> None:
         retriever=retriever,
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
+        answer_checker=approve_answer,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -459,6 +470,7 @@ def test_retrieval_graph_responds_to_user_on_high_confidence() -> None:
         retriever=retriever,
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
+        answer_checker=approve_answer,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -500,6 +512,7 @@ def test_retrieval_graph_responds_to_user_on_medium_confidence() -> None:
         retriever=retriever,
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
+        answer_checker=approve_answer,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -539,6 +552,7 @@ def test_low_confidence_offers_hr_without_generating_an_answer() -> None:
         retriever=retriever,
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
+        answer_checker=approve_answer,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -591,6 +605,7 @@ def test_no_documents_found_offers_hr() -> None:
         engine,
         retriever=retriever,
         message_router=route_to_hr,
+        answer_checker=approve_answer,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -628,6 +643,7 @@ def _build_graph(retriever, answer_generator=fake_answer_generator, message_rout
         retriever=retriever,
         answer_generator=answer_generator,
         message_router=message_router,
+        answer_checker=approve_answer,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -691,6 +707,7 @@ def test_graph_logs_every_interaction_and_returns_its_id() -> None:
         answer_generator=fake_answer_generator,
         interaction_logger=interaction_logger,
         message_router=route_to_hr,
+        answer_checker=approve_answer,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -726,6 +743,7 @@ def test_small_talk_is_answered_without_searching_or_offering_hr() -> None:
         message_router=lambda question, history: {"kind": "chat", "search_query": ""},
         chat_responder=chat_responder,
         interaction_logger=lambda state: logged.append(state) or "interaction-1",
+        answer_checker=approve_answer,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -768,6 +786,7 @@ def test_follow_up_searches_with_the_rewritten_question_and_answers_with_history
             "kind": "hr",
             "search_query": "How much annual leave do employees in Finland get?",
         },
+        answer_checker=approve_answer,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -798,3 +817,82 @@ def test_country_named_in_the_question_overrides_the_employees_country() -> None
     assert _filters_for("and there?", search_query="How much annual leave do employees in Finland get?") == "Finland"
     assert _filters_for("Is there parking at the Porto office?") == "Portugal"
     assert _filters_for("Compare sick pay in Estonia and Finland") is None
+
+
+def _checked_graph(checker, answer_generator):
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    return build_retrieval_graph(
+        engine,
+        retriever=FakeRetriever(),
+        answer_generator=answer_generator,
+        message_router=route_to_hr,
+        answer_checker=checker,
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+
+def _check(answers=True, unsupported=(), missing=()):
+    return lambda question, chunks, answer, **_: {
+        "answers_question": answers,
+        "unsupported_claims": list(unsupported),
+        "missing_details": list(missing),
+        "revised": False,
+    }
+
+
+def test_checked_answer_goes_straight_to_the_employee() -> None:
+    graph = _checked_graph(_check(), fake_answer_generator)
+
+    result = graph.invoke({"question": "How much annual leave do I get?", "employee_context": {}})
+
+    assert graph.visited[-3:] == ["check_answer", "respond_to_user", "log_interaction"]
+    assert result["final_response"]["answered"] is True
+
+
+def test_draft_that_talks_around_the_question_offers_hr_instead() -> None:
+    graph = _checked_graph(_check(answers=False), lambda q, c, **_: "Stock options on redundancy are case by case.")
+
+    result = graph.invoke({"question": "What happens to my stock options?", "employee_context": {}})
+
+    assert "answer_not_found" in graph.visited
+    assert "revise_answer" not in graph.visited
+    assert result["final_response"] == {"text": NOT_FOUND_MESSAGE, "sources": [], "answered": False}
+    assert result["hr_handoff"]["reason"] == "answer_declined"
+    assert result["answer_check"]["answers_question"] is False
+
+
+def test_draft_with_missing_details_is_rewritten_once_with_the_feedback() -> None:
+    calls = []
+
+    def answer_generator(question, chunks, **context):
+        calls.append(context)
+        return "Your manager and Finance approve it." if context.get("feedback") else "Your manager approves it."
+
+    graph = _checked_graph(_check(missing=["Ott Rebane (Finance) approves amounts over €300"]), answer_generator)
+
+    result = graph.invoke({"question": "Who approves equipment over budget?", "employee_context": {}})
+
+    assert graph.visited[-4:] == ["check_answer", "revise_answer", "respond_to_user", "log_interaction"]
+    assert calls[1]["draft"] == "Your manager approves it."
+    assert "Ott Rebane (Finance) approves amounts over €300" in calls[1]["feedback"]
+    assert result["final_response"]["text"] == "Your manager and Finance approve it."
+    assert result["answer_check"]["revised"] is True
+
+
+def test_rewrite_that_declines_offers_hr() -> None:
+    def answer_generator(question, chunks, **context):
+        return "INSUFFICIENT_CONTEXT" if context.get("feedback") else "Dogs are welcome."
+
+    graph = _checked_graph(_check(unsupported=["Dogs are welcome."]), answer_generator)
+
+    result = graph.invoke({"question": "Can I bring my dog?", "employee_context": {}})
+
+    assert result["final_response"]["answered"] is False
+    assert result["answer_check"]["revised"] is True

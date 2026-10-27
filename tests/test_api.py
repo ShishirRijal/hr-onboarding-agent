@@ -93,6 +93,7 @@ class FakeGraph:
         if result["final_response"]["answered"]:
             for token in ("Employees in Estonia ", "get 28 calendar days."):
                 yield "messages", (SimpleNamespace(content=token), {"langgraph_node": "generate_answer"})
+            yield "updates", {"generate_answer": {"answer_declined": False}}
         yield "updates", {"log_interaction": {key: value for key, value in result.items() if key not in state}}
 
 
@@ -355,7 +356,7 @@ def test_chat_returns_503_when_agent_fails(users) -> None:
     assert "OpenAI" not in response.text
 
 
-def test_chat_stream_sends_progress_tokens_and_final_answer(users) -> None:
+def test_chat_stream_sends_progress_and_the_checked_answer(users) -> None:
     with _client(users) as client:
         response = client.post("/chat/stream", json={"message": "How much annual leave do I get?", "session_id": "s-1"})
 
@@ -365,11 +366,11 @@ def test_chat_stream_sends_progress_tokens_and_final_answer(users) -> None:
     assert names[0] == "session"
     assert names[-1] == "done"
     statuses = [payload for name, payload in events if name == "status"]
-    assert [status["stage"] for status in statuses] == ["searching", "reading", "checking"]
+    assert [status["stage"] for status in statuses] == ["searching", "reading", "writing", "verifying"]
     assert statuses[0]["label"] == "Searching HR documents for Estonia"
     assert statuses[1]["documents"] == ["leave_policy"]
-    tokens = "".join(payload["text"] for name, payload in events if name == "token")
-    assert tokens == "Employees in Estonia get 28 calendar days."
+    # The draft isn't streamed; the checked answer arrives whole in "done".
+    assert not [name for name, _ in events if name == "token"]
     done = events[-1][1]
     assert done["answer"] == "Employees in Estonia get 28 calendar days."
     assert done["session_id"] == "s-1"

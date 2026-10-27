@@ -104,6 +104,15 @@ class MessageRoute(TypedDict):
     search_query: str
 
 
+class AnswerCheck(TypedDict):
+    # Whether the draft answers what was asked; when not, the employee is offered HR instead.
+    answers_question: bool
+    unsupported_claims: list[str]
+    missing_details: list[str]
+    # True once the draft has been rewritten to fix the problems above.
+    revised: bool
+
+
 class RetrievalState(TypedDict, total=False):
     session_id: str
     # The signed-in user asking, so the logged question belongs to them.
@@ -119,6 +128,7 @@ class RetrievalState(TypedDict, total=False):
     retrieved_chunks: list[RetrievedChunkPayload]
     retrieval_debug: RetrievalDebug
     generated_answer: GeneratedAnswer
+    answer_check: AnswerCheck
     answer_declined: bool
     confidence_score: float
     confidence_label: str

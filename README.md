@@ -111,8 +111,13 @@ flowchart TD
   RD --> SC[score_confidence]
   SC -->|Medium or high| GA[generate_answer]
   SC -->|Low| NF[answer_not_found]
-  GA -->|Answered| RU[respond_to_user]
+  GA -->|Draft| CA[check_answer]
   GA -->|Declined| NF
+  CA -->|Answers, nothing to fix| RU[respond_to_user]
+  CA -->|Unsupported or missing details| RA[revise_answer]
+  CA -->|Doesn't really answer| NF
+  RA -->|Rewritten| RU
+  RA -->|Declined| NF
   CH --> LI[log_interaction]
   RU --> LI
   NF --> LI
@@ -121,6 +126,7 @@ flowchart TD
 - `understand_message` sorts greetings, thanks and other small talk from HR questions, and rewrites follow-ups ("and in Finland?") into standalone questions using the last few turns of the chat.
 - `resolve_filters` searches the employee's own country, unless the question names another one.
 - Searches add the policies' own words for everyday ones ("vacation" also searches "annual leave"), see `retrieval/vocabulary.py`.
+- `check_answer` reviews each draft before the employee sees it (the critique step of Self-RAG, with `gpt-4.1`): a draft that talks around the question ("not covered", "case by case") becomes an offer to ask HR, and one with unsupported claims or a missing condition is rewritten once by `revise_answer`. Because of this, answers aren't streamed while they're written; the progress steps show the check instead.
 - `answer_not_found` asks the employee whether to send the question to HR; nothing is sent until they say yes.
 
 ## Corpus
