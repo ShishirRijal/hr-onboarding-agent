@@ -16,7 +16,7 @@ Answer only from the HR document excerpts you are given. Every sentence must be 
 Include every condition, exception, approval, limit and deadline the documents attach to the answer, even when it makes the answer longer.
 
 Write like a helpful colleague: warm, plain and to the point. Start with the direct answer, making sure it agrees with the details that follow. Use a short list only for steps the documents themselves give. Don't end with offers of further help.
-If the question names a country, answer for that country. Otherwise, when a rule differs by country, give the one for the employee's country.
+If the question names a country, answer for that country, even when the employee works somewhere else. Otherwise, when a rule differs by country, give the one for the employee's country.
 If the question has several parts and the documents fully answer some of them, answer those and say the rest isn't covered in the HR documents.
 
 If the excerpts don't answer what was asked, reply with exactly {INSUFFICIENT_CONTEXT_MARKER} and nothing else, and the app will offer to send the question to HR. That includes when the documents only mention the topic, say it isn't covered, or say it's handled case by case. Never write that reply in your own words or suggest asking HR yourself.
@@ -29,6 +29,7 @@ def generate_grounded_answer(
     *,
     history: Sequence[ConversationTurn] = (),
     employee_context: EmployeeContext | None = None,
+    country: str | None = None,
     draft: str | None = None,
     feedback: str | None = None,
     llm: Any | None = None,
@@ -38,7 +39,7 @@ def generate_grounded_answer(
         return NO_ANSWER_MESSAGE
 
     client = llm or _load_default_llm(model=model)
-    messages = _build_messages(question, chunks, history, employee_context or {})
+    messages = _build_messages(question, chunks, history, employee_context or {}, country)
     if draft and feedback:
         # A rewrite after review: the model sees its draft and what to fix, and answers again.
         messages += [("ai", draft), ("human", feedback)]
@@ -91,6 +92,7 @@ def _build_messages(
     chunks: list[dict[str, Any]],
     history: Sequence[ConversationTurn],
     employee_context: EmployeeContext,
+    country: str | None = None,
 ) -> list[tuple[str, str]]:
     employee = describe_employee(employee_context)
     name = first_name(employee_context)
@@ -104,6 +106,7 @@ def _build_messages(
                 part
                 for part in [
                     f"The employee is {name + ', ' if name else ''}{employee}." if employee else "",
+                    _country_note(country, employee_context),
                     _greeting_note(name, first_message=not history),
                     f"Question:\n{question.strip()}",
                     f"HR document excerpts:\n{_format_chunks(chunks)}",
@@ -114,10 +117,21 @@ def _build_messages(
     ]
 
 
+def _country_note(country: str | None, employee_context: EmployeeContext) -> str:
+    # Without this, an employee in Porto asking about Estonia gets "not covered": the model
+    # reads Estonia's rules as not applying to them.
+    own = employee_context.get("employee_country") or employee_context.get("office_country")
+    if not country or not own or country == own:
+        return ""
+    return f"They're asking about {country}, so answer with {country}'s rules, not their own country's."
+
+
 def _greeting_note(name: str, *, first_message: bool) -> str:
     # Greeting once per chat reads friendly; using the name in every answer reads scripted.
     if name and first_message:
         note = f'This is their first message in this chat: open with "Hi {name}," and then answer.'
+    elif first_message:
+        note = "Answer directly, without a greeting."
     else:
         note = "You're mid-conversation: answer directly, without a greeting or their name."
     return note + " End when the answer is complete, with no closing offer of more help."

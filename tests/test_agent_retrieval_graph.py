@@ -102,6 +102,15 @@ def approve_answer(question, chunks, answer, **_):
     return {"answers_question": True, "unsupported_claims": [], "missing_details": [], "revised": False}
 
 
+def keep_every_section(question, chunks, **_):
+    return {
+        "relevant_chunk_ids": [chunk["chunk_id"] for chunk in chunks],
+        "coverage": "complete",
+        "missing": "",
+        "searched_again": False,
+    }
+
+
 def route_to_hr(question, history):
     del history
     return {"kind": "hr", "search_query": question}
@@ -121,6 +130,7 @@ def test_retrieval_graph_resolves_country_from_employee_context() -> None:
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
         answer_checker=approve_answer,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -164,6 +174,7 @@ def test_retrieval_graph_prefers_explicit_override() -> None:
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
         answer_checker=approve_answer,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -199,6 +210,7 @@ def test_retrieval_graph_ignores_remote_office_country_for_filtering() -> None:
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
         answer_checker=approve_answer,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -236,6 +248,7 @@ def test_retrieval_graph_uses_injected_answer_generator() -> None:
         answer_generator=answer_generator,
         message_router=route_to_hr,
         answer_checker=approve_answer,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -276,6 +289,7 @@ def test_retrieval_graph_returns_low_confidence_without_chunks() -> None:
         retriever=retriever,
         message_router=route_to_hr,
         answer_checker=approve_answer,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -381,6 +395,7 @@ def test_retrieval_graph_deduplicates_answer_sources_by_location() -> None:
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
         answer_checker=approve_answer,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -446,6 +461,7 @@ def test_retrieval_graph_caps_confidence_below_perfect_score() -> None:
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
         answer_checker=approve_answer,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -471,6 +487,7 @@ def test_retrieval_graph_responds_to_user_on_high_confidence() -> None:
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
         answer_checker=approve_answer,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -513,6 +530,7 @@ def test_retrieval_graph_responds_to_user_on_medium_confidence() -> None:
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
         answer_checker=approve_answer,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -553,6 +571,7 @@ def test_low_confidence_offers_hr_without_generating_an_answer() -> None:
         answer_generator=fake_answer_generator,
         message_router=route_to_hr,
         answer_checker=approve_answer,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -606,6 +625,7 @@ def test_no_documents_found_offers_hr() -> None:
         retriever=retriever,
         message_router=route_to_hr,
         answer_checker=approve_answer,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -644,6 +664,7 @@ def _build_graph(retriever, answer_generator=fake_answer_generator, message_rout
         answer_generator=answer_generator,
         message_router=message_router,
         answer_checker=approve_answer,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -708,6 +729,7 @@ def test_graph_logs_every_interaction_and_returns_its_id() -> None:
         interaction_logger=interaction_logger,
         message_router=route_to_hr,
         answer_checker=approve_answer,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -744,6 +766,7 @@ def test_small_talk_is_answered_without_searching_or_offering_hr() -> None:
         chat_responder=chat_responder,
         interaction_logger=lambda state: logged.append(state) or "interaction-1",
         answer_checker=approve_answer,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -787,6 +810,7 @@ def test_follow_up_searches_with_the_rewritten_question_and_answers_with_history
             "search_query": "How much annual leave do employees in Finland get?",
         },
         answer_checker=approve_answer,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -832,6 +856,7 @@ def _checked_graph(checker, answer_generator):
         answer_generator=answer_generator,
         message_router=route_to_hr,
         answer_checker=checker,
+        document_grader=keep_every_section,
         state_graph_cls=FakeStateGraph,
         start_token="__start__",
         end_token="__end__",
@@ -896,3 +921,147 @@ def test_rewrite_that_declines_offers_hr() -> None:
 
     assert result["final_response"]["answered"] is False
     assert result["answer_check"]["revised"] is True
+
+
+def _chunk(chunk_id: str, text: str, dense: float = 0.8) -> RetrievedChunk:
+    return RetrievedChunk(
+        chunk_id=chunk_id,
+        text=text,
+        metadata={"source_doc": "it_guide", "source_file": "it_setup_guide.md", "section_path": chunk_id},
+        score=0.03,
+        source="fused",
+        ranks={"dense": 1},
+        scores={"dense": dense, "fused": 0.03},
+    )
+
+
+class SearchesInTurn:
+    """Returns the next list of results on each search, recording the queries."""
+
+    def __init__(self, *searches: list[RetrievedChunk]) -> None:
+        self.searches = list(searches)
+        self.queries: list[str] = []
+
+    def __call__(self, engine, query, **kwargs):
+        self.queries.append(query)
+        return self.searches.pop(0) if self.searches else []
+
+
+def _grades(*grades):
+    calls = []
+    queue = list(grades)
+
+    def grader(question, chunks, **_):
+        calls.append([chunk["chunk_id"] for chunk in chunks])
+        relevant, coverage, missing = queue.pop(0)
+        return {"relevant_chunk_ids": relevant, "coverage": coverage, "missing": missing, "searched_again": False}
+
+    return grader, calls
+
+
+def _corrective_graph(retriever, grader, answer_generator=fake_answer_generator):
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    return build_retrieval_graph(
+        engine,
+        retriever=retriever,
+        answer_generator=answer_generator,
+        message_router=route_to_hr,
+        answer_checker=approve_answer,
+        document_grader=grader,
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+
+CORRECTIVE = {"corrective_search": True}
+
+
+def test_found_sections_are_answered_without_grading_by_default() -> None:
+    grader, calls = _grades()
+    graph = _corrective_graph(SearchesInTurn([_chunk("budget", "Your manager approves.")]), grader)
+
+    result = graph.invoke({"question": "Who approves equipment?"})
+
+    assert calls == []
+    assert graph.visited[4:6] == ["read_neighbours", "generate_answer"]
+    assert result["final_response"]["answered"] is True
+
+
+def test_complete_coverage_goes_straight_to_the_answer_with_every_section() -> None:
+    seen = []
+
+    def answer_generator(question, chunks, **_):
+        seen.extend(chunk["chunk_id"] for chunk in chunks)
+        return "Your manager approves it."
+
+    grader, calls = _grades((["budget"], "complete", ""))
+    retriever = SearchesInTurn([_chunk("budget", "Your manager approves."), _chunk("furniture", "Desks are not IT.")])
+    graph = _corrective_graph(retriever, grader, answer_generator)
+
+    result = graph.invoke({"question": "Who approves equipment?", "retrieval_config": CORRECTIVE})
+
+    assert "search_again" not in graph.visited
+    # Grading doesn't remove sections: a general one often frames the specific one.
+    assert seen == ["budget", "furniture"]
+    assert result["document_grade"]["coverage"] == "complete"
+    assert result["final_response"]["answered"] is True
+
+
+def test_partial_sections_trigger_one_more_search_for_what_is_missing() -> None:
+    seen = []
+
+    def answer_generator(question, chunks, **_):
+        seen.extend(chunk["chunk_id"] for chunk in chunks)
+        return "Days 2 to 9 are paid by NordTech; from day 10 Kela pays."
+
+    grader, calls = _grades(
+        (["finland-sick"], "partial", "sick pay after day 9 Finland Kela"),
+        (["finland-sick", "kela"], "complete", ""),
+    )
+    retriever = SearchesInTurn(
+        [_chunk("finland-sick", "Day 1 is unpaid; NordTech pays days 2-9."), _chunk("payslips", "Payday is the 25th.")],
+        [_chunk("payslips", "Payday is the 25th."), _chunk("kela", "From day 10 Kela takes over.")],
+    )
+    graph = _corrective_graph(retriever, grader, answer_generator)
+
+    result = graph.invoke({"question": "If I'm off sick, do I still get paid?", "retrieval_config": CORRECTIVE})
+
+    assert graph.visited[graph.visited.index("grade_documents") + 1] == "search_again"
+    assert retriever.queries[1].startswith("sick pay after day 9 Finland Kela")
+    # Sections already graded aren't graded again unless they helped, or added unless new.
+    assert calls[1] == ["finland-sick", "kela"]
+    assert seen == ["finland-sick", "payslips", "kela"]
+    assert result["document_grade"]["searched_again"] is True
+    assert result["retrieval_debug"]["search_again_query"] == "sick pay after day 9 Finland Kela"
+    assert result["final_response"]["answered"] is True
+
+
+def test_no_relevant_sections_after_searching_again_offers_hr_without_writing() -> None:
+    grader, _ = _grades(([], "none", "salary raise timing"), ([], "none", "salary raise timing"))
+    retriever = SearchesInTurn([_chunk("reviews", "Reviews happen in May.")], [_chunk("payroll", "Payday is the 25th.")])
+    graph = _corrective_graph(retriever, grader)
+
+    result = graph.invoke({"question": "When do raises happen?", "retrieval_config": CORRECTIVE})
+
+    assert "generate_answer" not in graph.visited
+    assert result["final_response"] == {"text": NOT_FOUND_MESSAGE, "sources": [], "answered": False}
+    assert result["hr_handoff"]["reason"] == "no_relevant_sections"
+    assert result["hr_handoff"]["candidate_sources"]
+
+
+def test_second_search_finding_nothing_new_keeps_the_first_grade() -> None:
+    grader, calls = _grades((["budget"], "partial", "finance approval"))
+    retriever = SearchesInTurn([_chunk("budget", "Your manager approves.")], [_chunk("budget", "Your manager approves.")])
+    graph = _corrective_graph(retriever, grader)
+
+    result = graph.invoke({"question": "Who approves equipment?", "retrieval_config": CORRECTIVE})
+
+    assert len(calls) == 1
+    assert result["final_response"]["answered"] is True
+    assert result["document_grade"]["searched_again"] is True

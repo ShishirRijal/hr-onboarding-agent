@@ -29,6 +29,8 @@ class RetrievalConfig(TypedDict, total=False):
     dense_top_k: int
     bm25_top_k: int
     apply_reranker: bool
+    # Grade the found sections and search again for what they leave out (corrective RAG).
+    corrective_search: bool
 
 
 class RetrievedChunkPayload(TypedDict, total=False):
@@ -73,6 +75,8 @@ class ConfidenceDebug(TypedDict, total=False):
     has_sources: bool
     has_rerank_signal: bool
     answer_declined: bool
+    # Graded sections didn't answer the question, even after searching again.
+    no_relevant_sections: bool
 
 
 class HRHandoff(TypedDict):
@@ -113,6 +117,17 @@ class AnswerCheck(TypedDict):
     revised: bool
 
 
+class DocumentGrade(TypedDict):
+    # The found sections that help answer the question; the others aren't shown to the answer model.
+    relevant_chunk_ids: list[str]
+    # "complete", "partial" or "none": how much of the question those sections answer.
+    coverage: str
+    # What to search for when they don't answer all of it.
+    missing: str
+    # True once a second search has been run for what was missing.
+    searched_again: bool
+
+
 class RetrievalState(TypedDict, total=False):
     session_id: str
     # The signed-in user asking, so the logged question belongs to them.
@@ -127,6 +142,7 @@ class RetrievalState(TypedDict, total=False):
     resolved_filters: dict[str, str]
     retrieved_chunks: list[RetrievedChunkPayload]
     retrieval_debug: RetrievalDebug
+    document_grade: DocumentGrade
     generated_answer: GeneratedAnswer
     answer_check: AnswerCheck
     answer_declined: bool

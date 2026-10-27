@@ -109,8 +109,14 @@ flowchart TD
   UM -->|HR question| RF[resolve_filters]
   RF --> RD[retrieve_documents]
   RD --> SC[score_confidence]
-  SC -->|Medium or high| GA[generate_answer]
+  SC -->|Medium or high| RN[read_neighbours]
   SC -->|Low| NF[answer_not_found]
+  RN --> GA[generate_answer]
+  RN -.->|CORRECTIVE_SEARCH=1| GD[grade_documents]
+  GD -.->|Sections answer it| GA
+  GD -.->|Partly or not at all| SA[search_again]
+  SA -.->|Found more| GA
+  SA -.->|Still nothing relevant| NF
   GA -->|Draft| CA[check_answer]
   GA -->|Declined| NF
   CA -->|Answers, nothing to fix| RU[respond_to_user]
@@ -126,6 +132,8 @@ flowchart TD
 - `understand_message` sorts greetings, thanks and other small talk from HR questions, and rewrites follow-ups ("and in Finland?") into standalone questions using the last few turns of the chat.
 - `resolve_filters` searches the employee's own country, unless the question names another one.
 - Searches add the policies' own words for everyday ones ("vacation" also searches "annual leave"), see `retrieval/vocabulary.py`.
+- `read_neighbours`: documents are split into ~500-character pieces, and the condition that matters (an approver, the day a rule changes) is often in the next piece of the same section. Each found piece is read with the pieces either side of it, joined into one passage without the repeated overlap (`retrieval/context.py`). Citations still open the piece search found.
+- `grade_documents` and `search_again` are corrective RAG, off unless `CORRECTIVE_SEARCH=1`. `gpt-4.1-mini` grades whether the passages answer the whole question; if not, one more search runs for what's missing, in the policies' own words, and adds the passages that help. If neither search finds anything relevant, the employee is offered HR without an answer being written. Grading never removes passages: dropping the ones graded unhelpful cost more answers than it saved. It's off by default because, on the evaluation set, it added about a second per answer without changing the results: the first search already finds the right document for every test question, and reading neighbours brings in what was missing. It's there for real employees' phrasing, which is harder than the FAQ log's.
 - `check_answer` reviews each draft before the employee sees it (the critique step of Self-RAG, with `gpt-4.1`): a draft that talks around the question ("not covered", "case by case") becomes an offer to ask HR, and one with unsupported claims or a missing condition is rewritten once by `revise_answer`. Because of this, answers aren't streamed while they're written; the progress steps show the check instead.
 - `answer_not_found` asks the employee whether to send the question to HR; nothing is sent until they say yes.
 
@@ -174,7 +182,7 @@ QDRANT_URL=http://localhost:6333
 QDRANT_COLLECTION=nordtech_hr
 ```
 
-`COHERE_API_KEY` is optional. The API runs without Cohere reranking unless `USE_COHERE_RERANK=true` (the trial key is limited to 10 calls a minute).
+`COHERE_API_KEY` is optional. The API runs without Cohere reranking unless `USE_COHERE_RERANK=true` (the trial key is limited to 10 calls a minute). Corrective RAG (grading the found sections and searching again) is off unless `CORRECTIVE_SEARCH=true`.
 
 **1. Start Qdrant and Mailpit, and ingest the corpus**
 
@@ -295,6 +303,7 @@ PYTHONPATH=. poetry run pytest
 PYTHONPATH=. poetry run python scripts/eval_answers.py                      # everything, about 6 minutes
 PYTHONPATH=. poetry run python scripts/eval_answers.py --cases conversations --limit 3
 PYTHONPATH=. poetry run python scripts/eval_answers.py --answer-model gpt-4.1-mini --out-dir data/evaluations/gpt-4.1-mini
+PYTHONPATH=. poetry run python scripts/eval_answers.py --corrective-search  # with corrective RAG switched on
 PYTHONPATH=. poetry run python scripts/eval_answers.py --no-judge          # free checks only
 ```
 

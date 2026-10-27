@@ -13,16 +13,19 @@ from retrieval import (
     RetrievedChunk,
     retrieve,
 )
+from retrieval.context import expand_with_neighbours, passage_chunk_ids
 from retrieval.vocabulary import add_policy_terms
 
 from .answer_check import check_answer, revision_feedback
 from .answering import generate_grounded_answer, is_insufficient_answer
 from .conversation import MESSAGE_CHAT, generate_chat_reply, recent_history, route_message
+from .document_grading import COVERAGE_COMPLETE, grade_documents
 from .escalation import NOT_FOUND_MESSAGE, build_hr_handoff
 from .state import (
     AnswerCheck,
     AnswerSource,
     ConversationTurn,
+    DocumentGrade,
     EmployeeContext,
     FinalResponse,
     GeneratedAnswer,
@@ -65,6 +68,8 @@ def build_retrieval_graph(
     message_router: Callable[[str, list[ConversationTurn]], MessageRoute] = route_message,
     chat_responder: Callable[..., str] = generate_chat_reply,
     answer_checker: Callable[..., AnswerCheck] = check_answer,
+    document_grader: Callable[..., DocumentGrade] = grade_documents,
+    context_expander: Callable[[Any, list[dict[str, Any]]], list[dict[str, Any]]] = expand_with_neighbours,
     interaction_logger: Callable[[RetrievalState], str] | None = None,
     state_graph_cls: Any | None = None,
     start_token: Any | None = None,
@@ -92,6 +97,12 @@ def build_retrieval_graph(
         ),
     )
     graph.add_node("score_confidence", _score_confidence_node)
+    graph.add_node("read_neighbours", _make_read_neighbours_node(engine, context_expander))
+    graph.add_node("grade_documents", _make_grade_documents_node(document_grader))
+    graph.add_node(
+        "search_again",
+        _make_search_again_node(engine, retriever, document_grader, context_expander),
+    )
     graph.add_node(
         "generate_answer",
         _make_generate_answer_node(answer_generator=answer_generator or generate_grounded_answer),
@@ -115,11 +126,30 @@ def build_retrieval_graph(
     graph.add_edge("reply_in_chat", "log_interaction")
     graph.add_edge("resolve_filters", "retrieve_documents")
     graph.add_edge("retrieve_documents", "score_confidence")
-    # Retrieval is scored before generating, so a weak search never produces (or streams)
-    # an answer that would then be withdrawn.
+    # Retrieval is scored before generating, so a clearly off-topic search goes straight to
+    # the HR offer without spending a model call.
     graph.add_conditional_edges(
         "score_confidence",
         _route_after_confidence,
+        {"read_neighbours": "read_neighbours", "answer_not_found": "answer_not_found"},
+    )
+    # Corrective RAG, when switched on (retrieval_config["corrective_search"]): the passages
+    # are graded, and when they don't answer everything asked, one more search looks for
+    # what's missing. Off by default: on the evaluation set it added ~1s per answer without
+    # changing the results, because reading neighbours already brings in what was missing.
+    graph.add_conditional_edges(
+        "read_neighbours",
+        _route_after_reading,
+        {"grade_documents": "grade_documents", "generate_answer": "generate_answer"},
+    )
+    graph.add_conditional_edges(
+        "grade_documents",
+        _route_after_grading,
+        {"generate_answer": "generate_answer", "search_again": "search_again"},
+    )
+    graph.add_conditional_edges(
+        "search_again",
+        _route_after_search_again,
         {"generate_answer": "generate_answer", "answer_not_found": "answer_not_found"},
     )
     graph.add_conditional_edges(
@@ -244,6 +274,92 @@ def _make_retrieve_node(
     return _retrieve_node
 
 
+def _make_read_neighbours_node(
+    engine: RetrievalEngine,
+    context_expander: Callable[[Any, list[dict[str, Any]]], list[dict[str, Any]]],
+) -> Callable[[RetrievalState], dict[str, Any]]:
+    def _read_neighbours_node(state: RetrievalState) -> dict[str, Any]:
+        # Documents are split into ~500-character pieces and the condition that matters is
+        # often in the next one, so each found piece is read with its neighbours.
+        return {"retrieved_chunks": context_expander(engine.bm25_index, list(state.get("retrieved_chunks", [])))}
+
+    return _read_neighbours_node
+
+
+def _make_grade_documents_node(
+    document_grader: Callable[..., DocumentGrade],
+) -> Callable[[RetrievalState], dict[str, Any]]:
+    def _grade_documents_node(state: RetrievalState) -> dict[str, Any]:
+        grade = document_grader(
+            _clean_required_value(state.get("question"), field_name="question"),
+            state.get("retrieved_chunks", []),
+            history=state.get("history", []),
+        )
+        # Grading never removes a passage: dropping the ones graded unhelpful cost more
+        # answers than it saved (a general section often frames the specific one).
+        return {"document_grade": grade}
+
+    return _grade_documents_node
+
+
+def _make_search_again_node(
+    engine: RetrievalEngine,
+    retriever: Callable[..., list[RetrievedChunk]],
+    document_grader: Callable[..., DocumentGrade],
+    context_expander: Callable[[Any, list[dict[str, Any]]], list[dict[str, Any]]],
+) -> Callable[[RetrievalState], dict[str, Any]]:
+    def _search_again_node(state: RetrievalState) -> dict[str, Any]:
+        first_grade = state["document_grade"]
+        graded = list(state.get("retrieved_chunks", []))
+        seen = {chunk_id for passage in graded for chunk_id in passage_chunk_ids(passage)}
+        config = _normalize_retrieval_config(state.get("retrieval_config", {}))
+        filters = RetrievalFilters(**state.get("resolved_filters", {}))
+
+        results = retriever(
+            engine,
+            add_policy_terms(first_grade["missing"]),
+            filters=filters if not filters.is_empty() else None,
+            top_n=config["top_n"],
+            dense_top_k=config["dense_top_k"],
+            bm25_top_k=config["bm25_top_k"],
+            apply_reranker=config["apply_reranker"],
+        )
+        found = [asdict(chunk) for chunk in results if chunk.chunk_id not in seen]
+        new_passages = context_expander(engine.bm25_index, found) if found else []
+        grade = first_grade
+        if new_passages:
+            # The new passages are graded alongside the helpful ones from the first search,
+            # so coverage is judged on everything the answer would be written from.
+            grade = document_grader(
+                _clean_required_value(state.get("question"), field_name="question"),
+                _relevant(graded, first_grade) + new_passages,
+                history=state.get("history", []),
+            )
+        grade = {**grade, "searched_again": True}
+        retrieval_debug = {**state.get("retrieval_debug", {}), "search_again_query": first_grade["missing"]}
+
+        # Only new passages that help are added; the first search's passages all stay.
+        added = _relevant(new_passages, grade)
+        if added or first_grade["relevant_chunk_ids"]:
+            return {"retrieved_chunks": graded + added, "document_grade": grade, "retrieval_debug": retrieval_debug}
+        # Neither search found anything that answers it: the employee is offered HR.
+        return {
+            "retrieved_chunks": graded,
+            "document_grade": grade,
+            "retrieval_debug": retrieval_debug,
+            "confidence_score": 0.0,
+            "confidence_label": "low",
+            "confidence_debug": {**state.get("confidence_debug", {}), "no_relevant_sections": True},
+        }
+
+    return _search_again_node
+
+
+def _relevant(passages: list[dict[str, Any]], grade: DocumentGrade) -> list[dict[str, Any]]:
+    wanted = set(grade["relevant_chunk_ids"])
+    return [passage for passage in passages if passage.get("chunk_id") in wanted]
+
+
 def _make_generate_answer_node(
     *,
     answer_generator: Callable[..., str],
@@ -257,6 +373,7 @@ def _make_generate_answer_node(
             chunks,
             history=state.get("history", []),
             employee_context=state.get("employee_context", {}),
+            country=state.get("resolved_filters", {}).get("country"),
         ).strip()
         answer: GeneratedAnswer = {"text": text, "sources": _build_answer_sources(chunks)}
         if text and not is_insufficient_answer(text):
@@ -314,6 +431,7 @@ def _make_revise_answer_node(*, answer_generator: Callable[..., str]) -> Callabl
             chunks,
             history=state.get("history", []),
             employee_context=state.get("employee_context", {}),
+            country=state.get("resolved_filters", {}).get("country"),
             draft=state.get("generated_answer", {}).get("text", ""),
             feedback=revision_feedback(check),
         ).strip()
@@ -432,7 +550,22 @@ def _calculate_confidence_score(
 def _route_after_confidence(state: RetrievalState) -> str:
     if state.get("confidence_label", "low") in NOT_FOUND_CONFIDENCE_LABELS:
         return "answer_not_found"
-    return "generate_answer"
+    return "read_neighbours"
+
+
+def _route_after_reading(state: RetrievalState) -> str:
+    config = _normalize_retrieval_config(state.get("retrieval_config", {}))
+    return "grade_documents" if config["corrective_search"] else "generate_answer"
+
+
+def _route_after_grading(state: RetrievalState) -> str:
+    grade = state.get("document_grade") or {}
+    return "generate_answer" if grade.get("coverage") == COVERAGE_COMPLETE else "search_again"
+
+
+def _route_after_search_again(state: RetrievalState) -> str:
+    no_sections = (state.get("confidence_debug") or {}).get("no_relevant_sections")
+    return "answer_not_found" if no_sections else "generate_answer"
 
 
 def _route_after_answer(state: RetrievalState) -> str:
@@ -509,6 +642,7 @@ def _normalize_retrieval_config(raw_config: RetrievalConfig) -> dict[str, Any]:
         "dense_top_k": int(raw_config.get("dense_top_k", DEFAULT_DENSE_TOP_K)),
         "bm25_top_k": int(raw_config.get("bm25_top_k", DEFAULT_BM25_TOP_K)),
         "apply_reranker": bool(raw_config.get("apply_reranker", True)),
+        "corrective_search": bool(raw_config.get("corrective_search", False)),
     }
 
 

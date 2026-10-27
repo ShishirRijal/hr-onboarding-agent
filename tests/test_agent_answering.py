@@ -64,6 +64,7 @@ def test_generate_grounded_answer_includes_the_conversation_and_where_the_employ
         chunks,
         history=history,
         employee_context={"employee_country": "Estonia", "office_location": "Tallinn"},
+        country="Finland",
         llm=llm,
     )
 
@@ -73,3 +74,22 @@ def test_generate_grounded_answer_includes_the_conversation_and_where_the_employ
     assert messages[3][0] == "human"
     assert "The employee is based in Tallinn, Estonia." in messages[3][1]
     assert "And in Finland?" in messages[3][1]
+    assert "answer with Finland's rules, not their own country's" in messages[3][1]
+
+
+def test_no_country_note_when_asking_about_their_own_country() -> None:
+    llm = FakeLLM()
+    chunks = [{"chunk_id": "chunk-1", "text": "Annual leave in Estonia is 28 calendar days.", "metadata": {}}]
+
+    generate_grounded_answer(
+        "How much leave do I get?",
+        chunks,
+        employee_context={"employee_country": "Estonia"},
+        country="Estonia",
+        llm=llm,
+    )
+
+    prompt = llm.calls[0][-1][1]
+    assert "They're asking about" not in prompt
+    # No name and no earlier turns: a first message, so not "mid-conversation".
+    assert "Answer directly, without a greeting." in prompt

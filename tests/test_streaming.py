@@ -51,6 +51,7 @@ def test_stream_agent_streams_chat_replies_but_not_routing() -> None:
 class FakeCheckedAnswerGraph:
     def stream(self, state, stream_mode):
         yield "updates", {"score_confidence": {"confidence_label": "medium"}}
+        yield "updates", {"read_neighbours": {"retrieved_chunks": [{}, {}]}}
         # A draft is never streamed: only checked answers reach the employee.
         yield "messages", (SimpleNamespace(content="Draft text"), {"langgraph_node": "generate_answer"})
         yield "updates", {"generate_answer": {"answer_declined": False}}
@@ -66,3 +67,27 @@ def test_stream_agent_reports_the_answer_check_and_never_streams_drafts() -> Non
     assert [payload["stage"] for event, payload in events if event == "status"] == ["writing", "verifying", "revising"]
     assert not [event for event, _ in events if event == "token"]
     assert events[-1][1]["final_response"]["text"] == "Your manager and Finance."
+
+
+class FakeCorrectedSearchGraph:
+    def __init__(self, found: bool) -> None:
+        self.found = found
+
+    def stream(self, state, stream_mode):
+        yield "updates", {"score_confidence": {"confidence_label": "medium"}}
+        yield "updates", {"read_neighbours": {"retrieved_chunks": [{}, {}]}}
+        yield "updates", {"grade_documents": {"document_grade": {"coverage": "partial"}}}
+        if self.found:
+            yield "updates", {"search_again": {"retrieved_chunks": [{}], "document_grade": {"coverage": "complete"}}}
+        else:
+            yield "updates", {"search_again": {"confidence_debug": {"no_relevant_sections": True}}}
+
+
+def test_stream_agent_reports_the_second_search() -> None:
+    state = {"retrieval_config": {"corrective_search": True}}
+    found = [payload for event, payload in stream_agent(FakeCorrectedSearchGraph(True), state) if event == "status"]
+    missing = [payload for event, payload in stream_agent(FakeCorrectedSearchGraph(False), state) if event == "status"]
+
+    assert [status["stage"] for status in found] == ["grading", "searching_again", "writing"]
+    assert found[-1]["label"] == "Writing an answer from 1 section"
+    assert [status["stage"] for status in missing] == ["grading", "searching_again", "not_found"]

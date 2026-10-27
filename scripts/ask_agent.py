@@ -49,6 +49,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip Cohere reranking and return fused retrieval results.",
     )
+    parser.add_argument(
+        "--corrective-search",
+        action="store_true",
+        help="Grade the found sections and search again for what they leave out.",
+    )
     return parser.parse_args()
 
 
@@ -89,6 +94,7 @@ def main() -> None:
             "dense_top_k": args.dense_top_k,
             "bm25_top_k": args.bm25_top_k,
             "apply_reranker": not args.no_rerank,
+            "corrective_search": args.corrective_search,
         },
     }
 
