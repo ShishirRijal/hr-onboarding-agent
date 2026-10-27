@@ -4,7 +4,7 @@ from typing import Any, Literal, Sequence
 
 from pydantic import BaseModel, Field
 
-from .answering import DEFAULT_ANSWER_MODEL, _load_default_llm, describe_employee, history_messages
+from .answering import DEFAULT_ANSWER_MODEL, _load_default_llm, describe_employee, first_name, history_messages
 from .state import ConversationTurn, EmployeeContext, MessageRoute
 
 MESSAGE_CHAT = "chat"
@@ -23,7 +23,7 @@ search_query: for "hr", the question rewritten so it stands on its own, filling 
 
 CHAT_PROMPT = """You are NordTech Solutions' HR onboarding assistant, chatting with an employee{employee}.
 
-Be warm, friendly and brief, like a helpful colleague: one to three short sentences. Use their name if they have told you it.
+Be warm, friendly and brief, like a helpful colleague: one to three short sentences. Their first name is {name}: use it when greeting them and now and then after that, not in every reply.
 
 You help with NordTech HR and onboarding: leave, pay, benefits, IT setup, expenses, offices and the first weeks at the company. You answer from NordTech's HR documents, and when they don't cover something you can pass the question to the HR team.
 
@@ -76,7 +76,13 @@ def generate_chat_reply(
     client = llm or _load_default_llm(model=model, temperature=0.4)
     employee = describe_employee(employee_context or {})
     messages = [
-        ("system", CHAT_PROMPT.format(employee=f" {employee}" if employee else "")),
+        (
+            "system",
+            CHAT_PROMPT.format(
+                employee=f" {employee}" if employee else "",
+                name=first_name(employee_context or {}) or "not known",
+            ),
+        ),
         *history_messages(history),
         ("human", question),
     ]

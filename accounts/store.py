@@ -49,6 +49,7 @@ class User(Base):
         """Who is asking, for the agent: where they work decides which country's rules apply."""
         return {
             "employee_id": self.id,
+            "employee_name": self.name,
             "employee_country": self.country,
             "office_country": self.country,
             "office_location": self.office,
