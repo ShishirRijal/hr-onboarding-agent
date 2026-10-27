@@ -1,0 +1,22 @@
+# The API image only needs the Python packages, the scripts and the corpus.
+.git
+.venv
+.env
+.env.*
+!.env.example
+**/__pycache__
+.pytest_cache
+.claude
+.dual-graph
+.dual-graph-context
+.vscode
+data
+dev-docs
+docs
+plan
+tests
+web
+README.md
+CLAUDE.md
+CODEX.md
+commit.md

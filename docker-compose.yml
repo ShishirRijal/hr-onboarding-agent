@@ -1,3 +1,5 @@
+# The whole stack: `docker compose up --build`, then open http://localhost:3000.
+# The API reads secrets from .env (copy .env.example and add OPENAI_API_KEY).
 services:
   qdrant:
     image: qdrant/qdrant:latest
@@ -17,6 +19,45 @@ services:
     ports:
       - "1025:1025"
       - "8025:8025"
+    restart: unless-stopped
+
+  # On a first start it ingests the corpus into Qdrant and adds the demo accounts.
+  api:
+    build: .
+    container_name: hr-onboarding-api
+    env_file: .env
+    # The other services by their names inside the stack, whatever .env says for local runs.
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      INTERACTIONS_DATABASE_URL: sqlite:///data/interactions.db
+      CORPUS_DIR: corpus
+      WEB_ORIGINS: http://localhost:3000
+    # Chats, the HR inbox and accounts, shared with runs outside Docker.
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8010:8010"
+    depends_on:
+      - qdrant
+      - mailpit
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    container_name: hr-onboarding-web
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
