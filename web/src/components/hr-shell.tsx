@@ -66,8 +66,15 @@ function HrSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const open = overview?.open_questions ?? 0;
   const links = [
-    { href: "/hr", label: "Inbox", current: pathname === "/hr" || pathname.startsWith("/hr/q/"), count: open },
-    { href: "/hr/answered", label: "Answered", current: pathname === "/hr/answered", count: 0 },
+    { href: "/hr", label: "Inbox", current: pathname === "/hr" || pathname.startsWith("/hr/q/"), count: open, unit: "open" },
+    { href: "/hr/answered", label: "Answered", current: pathname === "/hr/answered", count: 0, unit: "" },
+    {
+      href: "/hr/review",
+      label: "Answer review",
+      current: pathname.startsWith("/hr/review"),
+      count: overview?.unhelpful_to_review ?? 0,
+      unit: "marked unhelpful",
+    },
   ];
 
   return (
@@ -93,7 +100,7 @@ function HrSidebar({ onNavigate }: { onNavigate?: () => void }) {
                 {link.count > 0 && (
                   <span className="rounded-full bg-lamp-wash px-2 py-0.5 text-xs font-semibold text-lamp tabular-nums">
                     {link.count}
-                    <span className="sr-only"> open</span>
+                    <span className="sr-only"> {link.unit}</span>
                   </span>
                 )}
               </Link>

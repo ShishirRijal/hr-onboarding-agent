@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
 from typing import Any, Sequence
 
@@ -18,6 +19,20 @@ REASONS = {
 DEFAULT_REASON = "The HR documents don't cover this."
 NO_DOCUMENT_TOPIC = "Not near any document"
 DOCUMENT_TITLE_PREFIX = "NordTech Solutions — "
+
+
+NAME_PLACEHOLDER = "[name]"
+
+
+def redact_names(text: str, employee_context: dict[str, Any]) -> str:
+    """The text without the employee's name, for places that don't say who asked: answers
+    greet employees by first name, and people mention their own."""
+    names = str(employee_context.get("employee_name") or "").split()
+    # The full name first, so "Joonas Laaksonen" becomes one placeholder, not two.
+    for name in [" ".join(names), *names]:
+        if len(name) > 1:
+            text = re.sub(rf"\b{re.escape(name)}\b", NAME_PLACEHOLDER, text, flags=re.IGNORECASE)
+    return text
 
 
 def reason_text(reason: str | None) -> str:

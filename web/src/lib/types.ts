@@ -81,6 +81,17 @@ export type SessionMessage = {
   hr_answer: string | null;
   hr_answered_by: string | null;
   hr_answered_at: string | null;
+  feedback: Rating | null;
+  feedback_comment: string | null;
+};
+
+// The thumbs under an answer.
+export type Rating = "up" | "down";
+
+export type FeedbackResponse = {
+  interaction_id: string;
+  feedback: Rating | null;
+  feedback_comment: string | null;
 };
 
 export type HrReply = { text: string; by: string | null; at: string | null };
@@ -101,6 +112,8 @@ export type AssistantMessage = {
   hrStatus?: HrStatus | "sending";
   hrMessage?: string;
   hrReply?: HrReply;
+  feedback?: Rating | null;
+  feedbackComment?: string | null;
 };
 
 export type ChatMessage = UserMessage | AssistantMessage;
@@ -151,8 +164,44 @@ export type HrQuestionDetail = HrQuestion & {
 export type HrOverview = {
   open_questions: number;
   answered_this_week: number;
+  // Answers employees marked unhelpful that HR hasn't reviewed yet.
+  unhelpful_to_review: number;
   common_topics: { topic: string; count: number }[];
   topics_since: string;
 };
 
 export type AnswerScope = "country" | "everyone";
+
+// Which answers the answer review lists.
+export type ReviewFilter = "all" | "unhelpful" | "helpful" | "not_answered" | "reviewed";
+
+// "correct": the answer was right; "corrected": HR wrote the answer they'd have given.
+export type ReviewVerdict = "correct" | "corrected";
+
+// A logged question in the answer review. Anonymous: only the asker's country.
+export type ReviewItem = {
+  interaction_id: string;
+  asked_at: string;
+  question: string;
+  answer: string;
+  answered: boolean;
+  small_talk: boolean;
+  country: string | null;
+  escalation_status: HrStatus | null;
+  feedback: Rating | null;
+  feedback_comment: string | null;
+  review_verdict: ReviewVerdict | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+};
+
+export type ReviewPage = { items: ReviewItem[]; total: number };
+
+export type ReviewDetail = ReviewItem & {
+  sources: Source[];
+  confidence_label: string;
+  reason: string | null;
+  hr_answer: string | null;
+  review_answer: string | null;
+  earlier_turns: { question: string; answer: string }[];
+};

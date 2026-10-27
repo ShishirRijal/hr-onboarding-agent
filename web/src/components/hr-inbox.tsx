@@ -33,7 +33,7 @@ function useQuestions(status: "requested" | "answered", refreshKey: unknown) {
   return result;
 }
 
-function Page({ title, intro, children }: { title: string; intro: string; children: React.ReactNode }) {
+export function HrPage({ title, intro, children }: { title: string; intro: string; children: React.ReactNode }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-[60rem] px-4 pt-8 pb-12 sm:px-6 sm:pt-10">
@@ -51,7 +51,7 @@ export function HrInbox() {
   const result = useQuestions("requested", overview?.open_questions);
 
   return (
-    <Page
+    <HrPage
       title="Inbox"
       intro="Questions employees sent to HR because the documents couldn't answer them. Your answer appears in the employee's chat and is added to what the assistant knows, so it can answer similar questions."
     >
@@ -69,7 +69,7 @@ export function HrInbox() {
           empty="No open questions. New ones appear here when an employee sends a question to HR."
         />
       </section>
-    </Page>
+    </HrPage>
   );
 }
 
@@ -77,14 +77,14 @@ export function HrAnswered() {
   const result = useQuestions("answered", null);
 
   return (
-    <Page
+    <HrPage
       title="Answered"
       intro="Questions the HR team has answered, newest first. Each answer is part of the assistant's knowledge for the employees it applies to."
     >
       <section className="mt-8" aria-label="Answered questions">
         <QuestionList result={result} empty="No answered questions yet." />
       </section>
-    </Page>
+    </HrPage>
   );
 }
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
@@ -273,3 +274,88 @@ def test_list_of_chats_only_has_the_signed_in_users_own(stores) -> None:
 
     assert [session["session_id"] for session in sessions] == ["s-1"]
     assert others.status_code == 404
+
+
+def test_employees_rate_their_own_answers_only(stores) -> None:
+    store, users = stores
+    with _client(stores, FakeKnowledge()) as client:
+        answered_id = _ask(store, users, "How much annual leave do I get?", session_id="s-1", answered=True)
+        unanswered_id = _ask(store, users, "Can I bring my dog?", session_id="s-1", answered=False)
+        _sign_in(client, HR)
+        assert client.post(f"/interactions/{answered_id}/feedback", json={"rating": "up"}).status_code == 404
+        _sign_in(client, EMPLOYEE)
+        rated = client.post(f"/interactions/{answered_id}/feedback", json={"rating": "down", "comment": " Wrong "})
+        not_an_answer = client.post(f"/interactions/{unanswered_id}/feedback", json={"rating": "down"})
+        history = client.get("/sessions/s-1/messages").json()
+
+    assert rated.json() == {"interaction_id": answered_id, "feedback": "down", "feedback_comment": "Wrong"}
+    assert not_an_answer.status_code == 409
+    assert (history[0]["feedback"], history[0]["feedback_comment"]) == ("down", "Wrong")
+
+
+def test_answer_review_shows_every_question_without_who_asked(stores) -> None:
+    store, users = stores
+    with _client(stores, FakeKnowledge()) as client:
+        sent_id = _send_to_hr(client, stores)
+        answered_id = store.list_session("s-1")[0].id
+        client.post(f"/interactions/{answered_id}/feedback", json={"rating": "down", "comment": "Wrong"})
+        _sign_in(client, EMPLOYEE)
+        assert client.get("/hr/review").status_code == 403
+        _sign_in(client, HR)
+        page = client.get("/hr/review").json()
+        unhelpful = client.get("/hr/review", params={"show": "unhelpful"}).json()
+        detail = client.get(f"/hr/review/{sent_id}").json()
+
+    assert page["total"] == 2
+    assert [item["interaction_id"] for item in page["items"]] == [sent_id, answered_id]
+    assert [item["interaction_id"] for item in unhelpful["items"]] == [answered_id]
+    assert unhelpful["items"][0]["feedback_comment"] == "Wrong"
+    assert detail["country"] == "Finland"
+    assert detail["escalation_status"] == "requested"
+    assert detail["earlier_turns"] == [{"question": "How much annual leave do I get?", "answer": "You get 25 days."}]
+    # Even for a question sent to HR, the review doesn't say who asked.
+    text = json.dumps([page, detail])
+    for detail_of_asker in ("Joonas", "joonas.laaksonen", "Senior Account Executive", "Tampere"):
+        assert detail_of_asker not in text
+
+
+def test_hr_reviews_an_answer_and_it_counts_down_from_the_overview(stores) -> None:
+    store, users = stores
+    with _client(stores, FakeKnowledge()) as client:
+        interaction_id = _ask(store, users, "How much annual leave do I get?", session_id="s-1", answered=True)
+        _sign_in(client, EMPLOYEE)
+        client.post(f"/interactions/{interaction_id}/feedback", json={"rating": "down"})
+        _sign_in(client, HR)
+        before = client.get("/hr/overview").json()
+        empty = client.post(f"/hr/review/{interaction_id}", json={"verdict": "corrected", "answer": "  "})
+        reviewed = client.post(f"/hr/review/{interaction_id}", json={"verdict": "corrected", "answer": "28 days."})
+        after = client.get("/hr/overview").json()
+        missing = client.post("/hr/review/missing", json={"verdict": "correct"})
+
+    assert before["unhelpful_to_review"] == 1
+    assert empty.status_code == 422
+    assert reviewed.json()["review_verdict"] == "corrected"
+    assert reviewed.json()["review_answer"] == "28 days."
+    assert reviewed.json()["reviewed_by"] == "Marju Ilves"
+    assert after["unhelpful_to_review"] == 0
+    assert missing.status_code == 404
+
+
+def test_answer_review_takes_the_employees_name_out_of_what_was_said(stores) -> None:
+    store, users = stores
+    employee = users.get_by_email(EMPLOYEE["email"])
+    interaction_id = store.log(
+        {
+            "session_id": "s-9",
+            "user_id": employee.id,
+            "question": "Hi, I'm Joonas Laaksonen. How much leave do I get?",
+            "employee_context": employee.employee_context(),
+            "final_response": {"text": "Hi Joonas, you get 25 days [1].", "sources": [], "answered": True},
+        }
+    )
+    with _client(stores, FakeKnowledge()) as client:
+        _sign_in(client, HR)
+        detail = client.get(f"/hr/review/{interaction_id}").json()
+
+    assert detail["question"] == "Hi, I'm [name]. How much leave do I get?"
+    assert detail["answer"] == "Hi [name], you get 25 days [1]."

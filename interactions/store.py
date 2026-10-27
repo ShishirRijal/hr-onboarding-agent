@@ -34,6 +34,14 @@ HR_REQUESTED = "requested"
 HR_DECLINED = "declined"
 HR_DISMISSED = "dismissed"
 HR_ANSWERED = "answered"
+# The employee's rating of an answer, from the thumbs under it.
+FEEDBACK_HELPFUL = "up"
+FEEDBACK_UNHELPFUL = "down"
+# HR's verdict when reviewing an answer: right as it is, or rewritten by HR.
+REVIEW_CORRECT = "correct"
+REVIEW_CORRECTED = "corrected"
+# What the answer review lists: everything, or one kind of answer.
+REVIEW_FILTERS = ("all", "unhelpful", "helpful", "not_answered", "reviewed")
 
 
 class Base(DeclarativeBase):
@@ -71,6 +79,17 @@ class Interaction(Base):
     hr_answer_chunk_id: Mapped[str | None] = mapped_column(String(36))
     # When the employee opened the chat after HR replied; None while the reply is unread.
     hr_answer_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The employee's rating ("up" or "down") and what they said was wrong; anonymous to HR.
+    feedback: Mapped[str | None] = mapped_column(String(8))
+    feedback_comment: Mapped[str | None] = mapped_column(Text)
+    feedback_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # HR's review of the answer: "correct", or "corrected" with the answer HR would have given.
+    # Kept as examples for evaluating and training the assistant; the employee doesn't see it.
+    review_verdict: Mapped[str | None] = mapped_column(String(16))
+    review_answer: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by: Mapped[str | None] = mapped_column(String(120))
+    reviewed_by_id: Mapped[str | None] = mapped_column(String(36))
     confidence_score: Mapped[float] = mapped_column(Float)
     confidence_label: Mapped[str] = mapped_column(String(16))
     employee_context: Mapped[dict[str, Any]] = mapped_column(JSON)
@@ -289,6 +308,86 @@ class InteractionStore:
                 .where(Interaction.id.in_(interaction_ids))
                 .values(hr_notified_at=at or datetime.now(timezone.utc))
             )
+
+    def record_feedback(
+        self,
+        interaction_id: str,
+        *,
+        rating: str | None,
+        comment: str | None = None,
+        at: datetime | None = None,
+    ) -> Interaction | None:
+        """Saves the employee's thumbs up or down; None takes it back."""
+        with self._sessions.begin() as session:
+            interaction = session.get(Interaction, interaction_id)
+            if interaction is None:
+                return None
+            if not interaction.answered:
+                raise ValueError("Only answers can be rated.")
+            interaction.feedback = rating
+            # A comment only goes with a thumbs down: it says what was wrong.
+            interaction.feedback_comment = (comment or None) if rating == FEEDBACK_UNHELPFUL else None
+            interaction.feedback_at = (at or datetime.now(timezone.utc)) if rating else None
+            return interaction
+
+    def review_page(self, show: str = "all", *, offset: int = 0, limit: int = 30) -> tuple[list[Interaction], int]:
+        """Every logged question for the answer review, newest first, and how many there are."""
+        condition = {
+            "all": None,
+            "unhelpful": Interaction.feedback == FEEDBACK_UNHELPFUL,
+            "helpful": Interaction.feedback == FEEDBACK_HELPFUL,
+            "not_answered": Interaction.answered.is_(False),
+            "reviewed": Interaction.review_verdict.is_not(None),
+        }[show]
+        with self._sessions() as session:
+            query = select(Interaction)
+            count = select(func.count()).select_from(Interaction)
+            if condition is not None:
+                query, count = query.where(condition), count.where(condition)
+            query = query.order_by(Interaction.created_at.desc()).offset(offset).limit(limit)
+            return list(session.scalars(query)), int(session.scalar(count) or 0)
+
+    def count_unhelpful_to_review(self) -> int:
+        with self._sessions() as session:
+            query = (
+                select(func.count())
+                .select_from(Interaction)
+                .where(Interaction.feedback == FEEDBACK_UNHELPFUL)
+                .where(Interaction.review_verdict.is_(None))
+            )
+            return int(session.scalar(query) or 0)
+
+    def record_review(
+        self,
+        interaction_id: str,
+        *,
+        verdict: str,
+        answer: str | None,
+        reviewed_by: str,
+        reviewed_by_id: str,
+        at: datetime | None = None,
+    ) -> Interaction | None:
+        """Saves HR's review of an answer. Reviewing again replaces it."""
+        with self._sessions.begin() as session:
+            interaction = session.get(Interaction, interaction_id)
+            if interaction is None:
+                return None
+            interaction.review_verdict = verdict
+            interaction.review_answer = answer if verdict == REVIEW_CORRECTED else None
+            interaction.reviewed_at = at or datetime.now(timezone.utc)
+            interaction.reviewed_by = reviewed_by
+            interaction.reviewed_by_id = reviewed_by_id
+            return interaction
+
+    def rated_or_reviewed(self) -> list[Interaction]:
+        """Answers with an employee rating or an HR review, oldest first: the examples to learn from."""
+        with self._sessions() as session:
+            query = (
+                select(Interaction)
+                .where((Interaction.feedback.is_not(None)) | (Interaction.review_verdict.is_not(None)))
+                .order_by(Interaction.created_at)
+            )
+            return list(session.scalars(query))
 
     def list_escalations(self, *, since: datetime | None = None) -> list[Interaction]:
         with self._sessions() as session:

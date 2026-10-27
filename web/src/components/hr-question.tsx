@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import { answerHrQuestion, ApiError, fetchHrQuestion } from "@/lib/api";
+import { stripCitations } from "@/lib/citations";
 import { firstName, formatDateTime } from "@/lib/format";
 import { officeLabel } from "@/lib/offices";
 import type { AnswerScope, HrQuestionDetail } from "@/lib/types";
@@ -73,7 +74,7 @@ export function HrQuestionView({ interactionId }: { interactionId: string }) {
                     }}
                   />
                 )}
-                <EarlierTurns detail={detail} />
+                <EarlierTurns turns={detail.earlier_turns} />
               </div>
               <div className="order-1 space-y-3 lg:order-2">
                 <AskerCard detail={detail} />
@@ -267,17 +268,17 @@ function AnswerSent({ detail, justSent }: { detail: HrQuestionDetail; justSent: 
   );
 }
 
-function EarlierTurns({ detail }: { detail: HrQuestionDetail }) {
+export function EarlierTurns({ turns }: { turns: { question: string; answer: string }[] }) {
   return (
     <section aria-labelledby="earlier">
       <h2 id="earlier" className="text-lg font-bold">
         Earlier in this chat
       </h2>
-      {detail.earlier_turns.length === 0 ? (
+      {turns.length === 0 ? (
         <p className="mt-1 text-sm text-ink-soft">This was the first question in the chat.</p>
       ) : (
         <ol className="mt-4 space-y-5">
-          {detail.earlier_turns.map((turn, index) => (
+          {turns.map((turn, index) => (
             <li key={index} className="space-y-3">
               <div className="flex justify-end">
                 <p className="max-w-[85%] rounded-3xl rounded-br-lg bg-brand-wash px-4 py-2.5 whitespace-pre-wrap text-ink">
@@ -287,7 +288,7 @@ function EarlierTurns({ detail }: { detail: HrQuestionDetail }) {
               <div className="flex gap-3">
                 <AssistantMark state="still" />
                 <div className="answer min-w-0 flex-1 pt-0.5">
-                  <Markdown>{turn.answer}</Markdown>
+                  <Markdown>{stripCitations(turn.answer)}</Markdown>
                 </div>
               </div>
             </li>
