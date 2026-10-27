@@ -14,6 +14,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent import build_retrieval_graph
+from agent.usage import UsageTracker, describe_usage
+from interactions import USAGE_SCRIPT, InteractionStore
 from retrieval import build_retrieval_engine
 
 
@@ -98,7 +100,11 @@ def main() -> None:
         },
     }
 
-    result = graph.invoke(state)
+    usage = UsageTracker()
+    try:
+        result = graph.invoke(state, config={"callbacks": [usage]})
+    finally:
+        InteractionStore().record_model_calls(usage.calls, source=USAGE_SCRIPT)
     response = result.get("final_response", {})
     sources = response.get("sources", [])
 
@@ -133,6 +139,10 @@ def main() -> None:
     print("-----")
     print(f"retrieval={result.get('retrieval_debug', {})}")
     print(f"confidence={result.get('confidence_debug', {})}")
+
+    print("\nModel usage")
+    print("-----------")
+    print(describe_usage(usage.calls))
 
 
 if __name__ == "__main__":

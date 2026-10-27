@@ -85,14 +85,17 @@ def run_cases(
     *,
     on_turn: Callable[[TurnResult], None] | None = None,
     retrieval_config: dict[str, Any] | None = None,
+    callbacks: list[Any] | None = None,
 ) -> list[TurnResult]:
     """Plays every case through the agent, one turn at a time, carrying the conversation
-    forward the way the API does."""
+    forward the way the API does. `callbacks` go to every run, to count the tokens used."""
     results: list[TurnResult] = []
     for case in cases:
         history: list[dict[str, str]] = []
         for index, turn in enumerate(case.turns, start=1):
-            result = _run_turn(graph, case, index, turn, history, retrieval_config or {"apply_reranker": False})
+            result = _run_turn(
+                graph, case, index, turn, history, retrieval_config or {"apply_reranker": False}, callbacks
+            )
             results.append(result)
             history.append({"question": turn.message, "answer": result.answer})
             if on_turn:
@@ -107,6 +110,7 @@ def _run_turn(
     turn: EvalTurn,
     history: list[dict[str, str]],
     retrieval_config: dict[str, Any],
+    callbacks: list[Any] | None = None,
 ) -> TurnResult:
     started = time.perf_counter()
     state = {
@@ -116,7 +120,7 @@ def _run_turn(
         "retrieval_config": dict(retrieval_config),
     }
     try:
-        final = graph.invoke(state)
+        final = graph.invoke(state, config={"callbacks": callbacks} if callbacks else None)
         error = None
     except Exception as exc:  # A failing turn is reported, not fatal to the run.
         final, error = {}, f"{type(exc).__name__}: {exc}"

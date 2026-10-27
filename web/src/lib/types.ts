@@ -203,5 +203,35 @@ export type ReviewDetail = ReviewItem & {
   reason: string | null;
   hr_answer: string | null;
   review_answer: string | null;
+  // The model calls this question took; null before usage was tracked.
+  usage: { calls: number; tokens: number; cost_usd: number; models: string[] } | null;
   earlier_turns: { question: string; answer: string }[];
+};
+
+export type UsagePeriodKey = "day" | "week" | "month" | "year";
+
+export type UsageNumbers = {
+  calls: number;
+  input_tokens: number;
+  cached_input_tokens: number;
+  output_tokens: number;
+  // At OpenAI's list prices; calls to a model without a known price are in unpriced_calls.
+  cost_usd: number;
+  unpriced_calls: number;
+  questions: number;
+};
+
+export type UsageRow = UsageNumbers & { name: string };
+
+export type UsageReport = {
+  periods: (UsageNumbers & { key: UsagePeriodKey; label: string; since: string })[];
+  period: UsagePeriodKey;
+  budget: { monthly_limit_usd: number | null; spent_usd: number; remaining_usd: number | null };
+  by_model: UsageRow[];
+  by_step: UsageRow[];
+  by_source: UsageRow[];
+  questions: number;
+  average_tokens_per_question: number | null;
+  average_cost_per_question_usd: number | null;
+  prices: { model: string; input_usd: number; cached_input_usd: number; output_usd: number }[];
 };

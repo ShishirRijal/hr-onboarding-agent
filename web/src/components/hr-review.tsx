@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, fetchReviewDetail, fetchReviewPage, saveReview } from "@/lib/api";
 import { stripCitations } from "@/lib/citations";
 import { formatDateTime } from "@/lib/format";
+import { formatNumber, formatUsd } from "@/lib/usage";
 import type { ReviewDetail, ReviewFilter, ReviewItem, ReviewVerdict, Source } from "@/lib/types";
 import { HrPage } from "./hr-inbox";
 import { EarlierTurns } from "./hr-question";
@@ -271,6 +272,12 @@ export function HrReviewDetailView({ interactionId }: { interactionId: string })
                     </p>
                   )}
                   {detail.feedback && <EmployeeFeedback detail={detail} />}
+                  {detail.usage && (
+                    <p className="mt-3 text-sm text-ink-soft">
+                      This answer took {formatNumber(detail.usage.tokens)} tokens in {detail.usage.calls} model calls (
+                      {detail.usage.models.join(", ")}), {formatUsd(detail.usage.cost_usd)}.
+                    </p>
+                  )}
                 </section>
 
                 <Review

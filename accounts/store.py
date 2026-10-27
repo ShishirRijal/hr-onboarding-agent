@@ -127,6 +127,11 @@ class UserStore:
         with self._sessions() as session:
             return session.get(User, user_id)
 
+    def names(self) -> list[str]:
+        """Everyone's full name, for masking them in traces sent outside the company."""
+        with self._sessions() as session:
+            return list(session.scalars(select(User.name)))
+
     def get_by_email(self, email: str) -> User | None:
         with self._sessions() as session:
             return session.scalar(select(User).where(User.email == normalize_email(email)))

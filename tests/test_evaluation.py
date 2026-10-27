@@ -20,7 +20,7 @@ class FakeGraph:
         self.replies = replies
         self.states = []
 
-    def invoke(self, state):
+    def invoke(self, state, config=None):
         self.states.append(state)
         reply = self.replies[state["question"]]
         if isinstance(reply, Exception):

@@ -53,7 +53,7 @@ class FakeKnowledge:
 
 
 class FakeGraph:
-    def invoke(self, state):
+    def invoke(self, state, config=None):
         raise AssertionError("The graph isn't used in these tests.")
 
 
@@ -359,3 +359,75 @@ def test_answer_review_takes_the_employees_name_out_of_what_was_said(stores) -> 
 
     assert detail["question"] == "Hi, I'm [name]. How much leave do I get?"
     assert detail["answer"] == "Hi [name], you get 25 days [1]."
+
+
+def _call(model: str, step: str, *, input_tokens: int = 1000, output_tokens: int = 100):
+    from agent.usage import ModelCall
+
+    return ModelCall(model=model, step=step, input_tokens=input_tokens, cached_input_tokens=0, output_tokens=output_tokens)
+
+
+def test_usage_report_totals_tokens_and_cost_by_period_model_and_step(stores, monkeypatch) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    store, users = stores
+    monkeypatch.setenv("MONTHLY_BUDGET_USD", "10")
+    now = datetime.now(timezone.utc)
+    question = _ask(store, users, "How much annual leave do I get?", session_id="s-1", answered=True)
+    store.record_model_calls(
+        [_call("gpt-4o-mini-2024-07-18", "generate_answer"), _call("gpt-4.1-2025-04-14", "check_answer")],
+        source="chat",
+        interaction_id=question,
+        at=now,
+    )
+    store.record_model_calls([_call("gpt-4.1", "evaluation_judge")], source="evaluation", at=now)
+    # From last year: not in this year's totals.
+    store.record_model_calls([_call("gpt-4.1", "check_answer")], source="chat", at=now - timedelta(days=400))
+
+    with _client(stores, FakeKnowledge()) as client:
+        _sign_in(client, EMPLOYEE)
+        assert client.get("/hr/usage").status_code == 403
+        _sign_in(client, HR)
+        report = client.get("/hr/usage").json()
+        detail = client.get(f"/hr/review/{question}").json()
+
+    day = report["periods"][0]
+    assert (day["key"], day["calls"], day["input_tokens"], day["output_tokens"]) == ("day", 3, 3000, 300)
+    # 1000 × $0.15 + 100 × $0.60, plus twice 1000 × $2 + 100 × $8, per million tokens.
+    assert day["cost_usd"] == round(0.00021 + 2 * 0.0028, 4)
+    assert [period["calls"] for period in report["periods"]] == [3, 3, 3, 3]
+    assert [row["name"] for row in report["by_model"]] == ["gpt-4.1", "gpt-4o-mini"]
+    assert {row["name"]: row["calls"] for row in report["by_step"]} == {
+        "check_answer": 1,
+        "evaluation_judge": 1,
+        "generate_answer": 1,
+    }
+    assert {row["name"]: row["calls"] for row in report["by_source"]} == {"chat": 2, "evaluation": 1}
+    assert report["questions"] == 1
+    assert report["average_tokens_per_question"] == 2200
+    assert report["budget"]["monthly_limit_usd"] == 10
+    assert report["budget"]["spent_usd"] == day["cost_usd"]
+    assert detail["usage"] == {
+        "calls": 2,
+        "tokens": 2200,
+        "cost_usd": round(0.00021 + 0.0028, 6),
+        "models": ["gpt-4.1", "gpt-4o-mini"],
+    }
+
+
+def test_the_assistant_stops_answering_once_the_monthly_limit_is_reached(stores, monkeypatch) -> None:
+    store, _ = stores
+    store.record_model_calls([_call("gpt-4.1", "check_answer", input_tokens=1_000_000)], source="chat")
+    with _client(stores, FakeKnowledge()) as client:
+        _sign_in(client, EMPLOYEE)
+        monkeypatch.setenv("MONTHLY_BUDGET_USD", "2.50")
+        under = client.post("/chat", json={"message": "How much leave do I get?"})
+        monkeypatch.setenv("MONTHLY_BUDGET_USD", "2")
+        over = client.post("/chat", json={"message": "How much leave do I get?"})
+        stream = client.post("/chat/stream", json={"message": "How much leave do I get?"})
+
+    # Under the limit the question reaches the agent (which fails here, as these tests have none).
+    assert under.json()["detail"] == "The assistant is temporarily unavailable."
+    assert over.status_code == stream.status_code == 503
+    assert "this month's usage limit" in over.json()["detail"]
+    assert "this month's usage limit" in stream.json()["detail"]

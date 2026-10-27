@@ -16,11 +16,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from accounts import ROLE_HR, SESSION_LIFETIME, User, UserStore, seed_demo_users
-from agent.escalation import HR_REQUEST_DECLINED_MESSAGE, hr_request_sent_message
 from agent.conversation import MESSAGE_CHAT
-from interactions import HR_ANSWERED, HR_OFFERED, HR_REQUESTED, REVIEW_CORRECTED, Interaction
+from agent.escalation import HR_CONTACT_EMAIL, HR_REQUEST_DECLINED_MESSAGE, hr_request_sent_message
+from agent.tracing import start_tracing, stop_tracing, trace_metadata, tracing_callbacks
+from agent.usage import MODEL_PRICES, UsageTracker
+from interactions import HR_ANSWERED, HR_OFFERED, HR_REQUESTED, REVIEW_CORRECTED, USAGE_CHAT, Interaction
 from interactions.digest import DEFAULT_DIGEST_TIMEZONE, DigestSettings, schedule_daily_digest
 from interactions.inbox import common_topics, documents_checked, reason_text, redact_names
+from interactions.store import as_utc
+from interactions.usage import UsageTotals, breakdown, model_name, totals
 from retrieval.settings import SHARED_COUNTRY
 
 from .schemas import (
@@ -37,6 +41,12 @@ from .schemas import (
     HRQuestionDetail,
     HRRequest,
     HRRequestResponse,
+    InteractionUsage,
+    ModelPrice,
+    UsageBudget,
+    UsagePeriod,
+    UsageReport,
+    UsageRow,
     ReviewDetail,
     ReviewFilter,
     ReviewItem,
@@ -70,6 +80,12 @@ ALREADY_ANSWERED = "This question has already been answered."
 COUNTRY_UNKNOWN = "The employee's country isn't known, so the answer can only be added for everyone."
 ONLY_ANSWERS_RATED = "Only answers can be rated."
 CORRECTION_NEEDED = "Write the answer you'd give before saving it."
+BUDGET_REACHED = (
+    "The assistant has reached this month's usage limit. "
+    f"Email {HR_CONTACT_EMAIL} with your question and HR will answer it."
+)
+# The periods the HR usage page totals, in HR's time zone.
+USAGE_PERIODS = (("day", "Today"), ("week", "This week"), ("month", "This month"), ("year", "This year"))
 KNOWLEDGE_UNAVAILABLE = "The answer couldn't be added to the knowledge base, so it wasn't sent. Try again."
 
 
@@ -113,12 +129,16 @@ def create_app(
             app.state.graph, app.state.store, app.state.passages = graph, store, passages
             app.state.knowledge = knowledge
         app.state.users = users if users is not None else _build_users()
+        # Off unless the Langfuse keys are set; everyone's name is masked in what's sent.
+        if start_tracing(app.state.users.names()):
+            logger.info("Tracing agent runs to Langfuse at %s.", os.getenv("LANGFUSE_BASE_URL") or os.getenv("LANGFUSE_HOST"))
         # The embedding model is not safe to call from several threads at once, so requests
         # run the graph, and add HR answers to the knowledge base, one at a time.
         app.state.graph_lock = threading.Lock()
         yield
         if digest_scheduler is not None:
             digest_scheduler.shutdown(wait=False)
+        stop_tracing()
 
     app = FastAPI(title="NordTech HR Onboarding Agent", lifespan=lifespan)
     app.add_middleware(
@@ -164,31 +184,44 @@ def create_app(
 
     @app.post("/chat", response_model=ChatResponse)
     def chat(request: ChatRequest, http_request: Request, user: CurrentUser) -> ChatResponse:
-        session_id, state = _initial_state(request, user, http_request.app.state.store)
+        store = http_request.app.state.store
+        _check_budget(store)
+        session_id, state = _initial_state(request, user, store)
+        # Every model call the answer takes is counted, and saved against the question.
+        tracker = UsageTracker()
+        result: dict[str, Any] = {}
         try:
             with http_request.app.state.graph_lock:
-                result = http_request.app.state.graph.invoke(state)
+                result = http_request.app.state.graph.invoke(state, config=_run_config(tracker, session_id, user))
         except Exception as exc:
             logger.exception("Agent failed to answer.")
             raise HTTPException(status_code=503, detail=UNAVAILABLE_MESSAGE) from exc
+        finally:
+            _record_usage(store, tracker, result.get("interaction_id"))
         return _chat_response(session_id, result)
 
     @app.post("/chat/stream")
     def chat_stream(request: ChatRequest, http_request: Request, user: CurrentUser) -> StreamingResponse:
         app_state = http_request.app.state
+        _check_budget(app_state.store)
         session_id, state = _initial_state(request, user, app_state.store)
 
         def events() -> Iterator[str]:
+            tracker = UsageTracker()
+            interaction_id = None
             yield sse("session", {"session_id": session_id})
             try:
                 with app_state.graph_lock:
-                    for event, payload in stream_agent(app_state.graph, state):
+                    for event, payload in stream_agent(app_state.graph, state, config=_run_config(tracker, session_id, user)):
                         if event == "done":
+                            interaction_id = payload.get("interaction_id")
                             payload = _chat_response(session_id, payload).model_dump()
                         yield sse(event, payload)
             except Exception:
                 logger.exception("Agent failed to answer.")
                 yield sse("error", {"detail": UNAVAILABLE_MESSAGE})
+            finally:
+                _record_usage(app_state.store, tracker, interaction_id)
 
         return StreamingResponse(
             events(),
@@ -302,7 +335,7 @@ def create_app(
         topics_since = now - TOPIC_WINDOW
         return HROverview(
             open_questions=len(store.hr_questions(HR_REQUESTED)),
-            answered_this_week=store.count_hr_answered_since(_week_start(now)),
+            answered_this_week=store.count_hr_answered_since(_period_starts(now)["week"]),
             unhelpful_to_review=store.count_unhelpful_to_review(),
             common_topics=[
                 TopicCount(topic=topic, count=count)
@@ -358,6 +391,42 @@ def create_app(
                 chunk_id=chunk_id,
             )
         return _hr_question_detail(answered, app_state.store, app_state.users)
+
+    @app.get("/hr/usage", response_model=UsageReport, dependencies=[Depends(hr_user)])
+    def usage_report(http_request: Request, period: Literal["day", "week", "month", "year"] = "month") -> UsageReport:
+        starts = _period_starts(datetime.now(timezone.utc))
+        calls = http_request.app.state.store.model_calls_since(starts["year"])
+
+        def since(start: datetime) -> list[Any]:
+            return [call for call in calls if as_utc(call.at) >= start]
+
+        chosen = since(starts[period])
+        month = totals(since(starts["month"]))
+        budget = _monthly_budget()
+        chat = totals(call for call in chosen if call.source == USAGE_CHAT)
+        questions = len(chat.questions)
+        return UsageReport(
+            periods=[
+                UsagePeriod(key=key, label=label, since=starts[key], **_usage_numbers(totals(since(starts[key]))))
+                for key, label in USAGE_PERIODS
+            ],
+            period=period,
+            budget=UsageBudget(
+                monthly_limit_usd=budget,
+                spent_usd=round(month.cost_usd, 4),
+                remaining_usd=None if budget is None else round(max(budget - month.cost_usd, 0.0), 4),
+            ),
+            by_model=_usage_rows(breakdown(chosen, model_name)),
+            by_step=_usage_rows(breakdown(chosen, lambda call: call.step or "other")),
+            by_source=_usage_rows(breakdown(chosen, lambda call: call.source)),
+            questions=questions,
+            average_tokens_per_question=round(chat.total_tokens / questions) if questions else None,
+            average_cost_per_question_usd=round(chat.cost_usd / questions, 6) if questions else None,
+            prices=[
+                ModelPrice(model=model, input_usd=prices[0], cached_input_usd=prices[1], output_usd=prices[2])
+                for model, prices in MODEL_PRICES.items()
+            ],
+        )
 
     @app.get("/hr/review", response_model=ReviewPage, dependencies=[Depends(hr_user)])
     def review_page(
@@ -542,6 +611,7 @@ def _review_detail(interaction: Interaction, store: Any) -> ReviewDetail:
         reason=None if interaction.answered else reason_text(interaction.escalation_reason),
         hr_answer=redact_names(interaction.hr_answer, context) if interaction.hr_answer else None,
         review_answer=interaction.review_answer,
+        usage=_interaction_usage(store.interaction_model_calls(interaction.id)),
         earlier_turns=[
             ConversationTurnOut(question=redact_names(turn.question, context), answer=redact_names(turn.answer, context))
             for turn in _earlier_turns(interaction, store)
@@ -549,11 +619,84 @@ def _review_detail(interaction: Interaction, store: Any) -> ReviewDetail:
     )
 
 
-def _week_start(now: datetime) -> datetime:
-    """Monday 00:00 of this week in HR's time zone, in UTC."""
+def _period_starts(now: datetime) -> dict[str, datetime]:
+    """When today, this week (from Monday), this month and this year began in HR's time
+    zone, in UTC."""
     local = now.astimezone(ZoneInfo(os.getenv("HR_DIGEST_TIMEZONE", DEFAULT_DIGEST_TIMEZONE)))
-    monday = (local - timedelta(days=local.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-    return monday.astimezone(timezone.utc)
+    day = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    starts = {
+        "day": day,
+        "week": day - timedelta(days=day.weekday()),
+        "month": day.replace(day=1),
+        "year": day.replace(month=1, day=1),
+    }
+    return {key: start.astimezone(timezone.utc) for key, start in starts.items()}
+
+
+def _monthly_budget() -> float | None:
+    """MONTHLY_BUDGET_USD: once this month's calls cost this much, the assistant stops
+    answering until next month. Unset means no limit."""
+    value = os.getenv("MONTHLY_BUDGET_USD", "").strip()
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        logger.warning("MONTHLY_BUDGET_USD=%r isn't a number, so there is no monthly limit.", value)
+        return None
+
+
+def _check_budget(store: Any) -> None:
+    budget = _monthly_budget()
+    if budget is None:
+        return
+    month_start = _period_starts(datetime.now(timezone.utc))["month"]
+    if totals(store.model_calls_since(month_start)).cost_usd >= budget:
+        raise HTTPException(status_code=503, detail=BUDGET_REACHED)
+
+
+def _run_config(tracker: UsageTracker, session_id: str, user: User) -> dict[str, Any]:
+    """Callbacks for one question: the usage count, and the Langfuse trace when it's on."""
+    return {
+        "callbacks": [tracker, *tracing_callbacks()],
+        "metadata": trace_metadata(session_id=session_id, user_id=user.id, tags=["chat"]),
+    }
+
+
+def _record_usage(store: Any, tracker: UsageTracker, interaction_id: str | None) -> None:
+    # Counting must never cost the employee their answer.
+    try:
+        store.record_model_calls(tracker.calls, source=USAGE_CHAT, interaction_id=interaction_id)
+    except Exception:
+        logger.exception("Couldn't save the model usage of a question.")
+
+
+def _usage_numbers(total: UsageTotals) -> dict[str, Any]:
+    return {
+        "calls": total.calls,
+        "input_tokens": total.input_tokens,
+        "cached_input_tokens": total.cached_input_tokens,
+        "output_tokens": total.output_tokens,
+        "cost_usd": round(total.cost_usd, 4),
+        "unpriced_calls": total.unpriced_calls,
+        "questions": len(total.questions),
+    }
+
+
+def _usage_rows(groups: list[tuple[str, UsageTotals]]) -> list[UsageRow]:
+    return [UsageRow(name=name, **_usage_numbers(total)) for name, total in groups]
+
+
+def _interaction_usage(calls: list[Any]) -> InteractionUsage | None:
+    if not calls:
+        return None
+    total = totals(calls)
+    return InteractionUsage(
+        calls=total.calls,
+        tokens=total.total_tokens,
+        cost_usd=round(total.cost_usd, 6),
+        models=sorted({model_name(call) for call in calls}),
+    )
 
 
 def _build_agent() -> tuple[Any, Any, Any, Any]:

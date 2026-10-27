@@ -75,6 +75,7 @@ function HrSidebar({ onNavigate }: { onNavigate?: () => void }) {
       count: overview?.unhelpful_to_review ?? 0,
       unit: "marked unhelpful",
     },
+    { href: "/hr/usage", label: "Usage", current: pathname === "/hr/usage", count: 0, unit: "" },
   ];
 
   return (

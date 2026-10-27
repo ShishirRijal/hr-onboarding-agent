@@ -12,9 +12,13 @@ from .store import (
     REVIEW_CORRECT,
     REVIEW_CORRECTED,
     REVIEW_FILTERS,
+    USAGE_CHAT,
+    USAGE_EVALUATION,
+    USAGE_SCRIPT,
     ChatSession,
     Interaction,
     InteractionStore,
+    ModelUsage,
 )
 
 __all__ = [
@@ -29,7 +33,11 @@ __all__ = [
     "REVIEW_CORRECT",
     "REVIEW_CORRECTED",
     "REVIEW_FILTERS",
+    "USAGE_CHAT",
+    "USAGE_EVALUATION",
+    "USAGE_SCRIPT",
     "ChatSession",
     "Interaction",
     "InteractionStore",
+    "ModelUsage",
 ]

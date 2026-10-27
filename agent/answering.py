@@ -85,7 +85,8 @@ def _load_default_llm(*, model: str = DEFAULT_ANSWER_MODEL, temperature: float =
     except ImportError as exc:  # pragma: no cover - dependency guard
         raise RuntimeError("langchain-openai is required to generate grounded answers.") from exc
 
-    return ChatOpenAI(model=model, temperature=temperature)
+    # stream_usage keeps token counts when LangGraph streams the call, so usage is always tracked.
+    return ChatOpenAI(model=model, temperature=temperature, stream_usage=True)
 
 
 def _build_messages(

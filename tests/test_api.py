@@ -76,13 +76,13 @@ class FakeGraph:
             **(self.result or {}),
         }
 
-    def invoke(self, state):
+    def invoke(self, state, config=None):
         self.states.append(state)
         if self.error is not None:
             raise self.error
         return self._result(state)
 
-    def stream(self, state, stream_mode):
+    def stream(self, state, stream_mode, config=None):
         self.states.append(state)
         if self.error is not None:
             raise self.error
@@ -105,6 +105,7 @@ class FakeStore:
         self.owner_id = owner_id
         self.choices: list[tuple[str, bool, str | None, str | None]] = []
         self.read: list[str] = []
+        self.usage: list[tuple[str, str | None, list[object]]] = []
 
     def _interaction(self, interaction_id: str, *, answered: bool = False):
         return SimpleNamespace(
@@ -136,6 +137,12 @@ class FakeStore:
 
     def list_session(self, session_id):
         return [self._interaction("interaction-1")]
+
+    def model_calls_since(self, since):
+        return []
+
+    def record_model_calls(self, calls, *, source, interaction_id=None):
+        self.usage.append((source, interaction_id, list(calls)))
 
     def mark_hr_answers_read(self, session_id):
         self.read.append(session_id)
@@ -254,6 +261,8 @@ def test_sign_in_rejects_a_wrong_password_or_unknown_email_the_same_way(users) -
         ("get", "/hr/questions"),
         ("get", "/hr/questions/interaction-1"),
         ("post", "/hr/questions/interaction-1/answer"),
+        ("get", "/hr/usage"),
+        ("get", "/hr/review"),
     ],
 )
 def test_every_route_but_health_and_sign_in_needs_a_session(users, method, path) -> None:
@@ -289,6 +298,7 @@ def test_sign_out_revokes_the_session(users) -> None:
         ("get", "/hr/questions"),
         ("get", "/hr/questions/interaction-1"),
         ("post", "/hr/questions/interaction-1/answer"),
+        ("get", "/hr/usage"),
     ],
 )
 def test_employees_cannot_use_the_hr_routes(users, method, path) -> None:
@@ -457,3 +467,36 @@ def test_source_returns_the_document_with_the_chunk_highlighted(users) -> None:
 def test_source_returns_404_for_unknown_chunks(users) -> None:
     with _client(users) as client:
         assert client.get("/sources/unknown").status_code == 404
+
+
+class UsingModels(FakeGraph):
+    """Makes one model call, as the real graph's nodes do, through the run's callbacks."""
+
+    def invoke(self, state, config=None):
+        from uuid import uuid4
+
+        from langchain_core.messages import AIMessage
+        from langchain_core.outputs import ChatGeneration, LLMResult
+
+        tracker = config["callbacks"][0]
+        run_id = uuid4()
+        tracker.on_chat_model_start({}, [], run_id=run_id, metadata={"langgraph_node": "generate_answer"})
+        message = AIMessage(
+            content="",
+            usage_metadata={"input_tokens": 1200, "output_tokens": 80, "total_tokens": 1280},
+            response_metadata={"model_name": "gpt-4o-mini"},
+        )
+        tracker.on_llm_end(LLMResult(generations=[[ChatGeneration(message=message)]]), run_id=run_id)
+        return super().invoke(state)
+
+
+def test_chat_saves_the_tokens_each_question_used(users) -> None:
+    store = FakeStore(owner_id=users.get_by_email(EMPLOYEE["email"]).id)
+    with _client(users, UsingModels(), store) as client:
+        client.post("/chat", json={"message": "How much annual leave do I get?"})
+
+    [(source, interaction_id, calls)] = store.usage
+    assert (source, interaction_id) == ("chat", "interaction-1")
+    assert [(call.model, call.step, call.input_tokens, call.output_tokens) for call in calls] == [
+        ("gpt-4o-mini", "generate_answer", 1200, 80)
+    ]
