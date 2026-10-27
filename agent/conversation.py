@@ -5,6 +5,7 @@ from typing import Any, Literal, Sequence
 from pydantic import BaseModel, Field
 
 from .answering import DEFAULT_ANSWER_MODEL, _load_default_llm, describe_employee, first_name, history_messages
+from .citations import strip_citations
 from .state import ConversationTurn, EmployeeContext, MessageRoute
 
 MESSAGE_CHAT = "chat"
@@ -37,9 +38,9 @@ class _RouteDecision(BaseModel):
 
 
 def recent_history(turns: Sequence[ConversationTurn]) -> list[ConversationTurn]:
-    """The last few turns, with long answers shortened."""
+    """The last few turns, with long answers shortened and their citations removed."""
     return [
-        {"question": turn["question"], "answer": turn["answer"][:MAX_HISTORY_ANSWER_CHARS]}
+        {"question": turn["question"], "answer": strip_citations(turn["answer"])[:MAX_HISTORY_ANSWER_CHARS]}
         for turn in list(turns)[-MAX_HISTORY_TURNS:]
     ]
 

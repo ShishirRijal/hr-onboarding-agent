@@ -18,6 +18,7 @@ from retrieval.vocabulary import add_policy_terms
 
 from .answer_check import check_answer, revision_feedback
 from .answering import generate_grounded_answer, is_insufficient_answer
+from .citations import answer_source, number_citations, source_key
 from .conversation import MESSAGE_CHAT, generate_chat_reply, recent_history, route_message
 from .document_grading import COVERAGE_COMPLETE, grade_documents
 from .escalation import NOT_FOUND_MESSAGE, build_hr_handoff
@@ -451,32 +452,15 @@ def _build_answer_sources(chunks: list[dict[str, Any]]) -> list[AnswerSource]:
     seen: set[tuple[Any, ...]] = set()
 
     for chunk in chunks:
-        chunk_id = str(chunk.get("chunk_id", "")).strip()
-        if not chunk_id:
+        if not str(chunk.get("chunk_id", "")).strip():
             continue
 
-        metadata = chunk.get("metadata", {}) or {}
-        source_key = (
-            metadata.get("source_file"),
-            metadata.get("source_doc"),
-            metadata.get("section_path"),
-            metadata.get("page_number"),
-            metadata.get("row_number"),
-        )
-        if source_key in seen:
+        key = source_key(chunk)
+        if key in seen:
             continue
 
-        seen.add(source_key)
-        source: AnswerSource = {
-            "chunk_id": chunk_id,
-            "score": float(chunk.get("score", 0.0) or 0.0),
-        }
-        for key in ("source_doc", "source_file", "section_path", "page_number", "row_number"):
-            value = metadata.get(key)
-            if value is not None:
-                source[key] = value
-
-        sources.append(source)
+        seen.add(key)
+        sources.append(answer_source(chunk))
         if len(sources) >= MAX_ANSWER_SOURCES:
             break
 
@@ -589,9 +573,13 @@ def _route_after_revision(state: RetrievalState) -> str:
 
 def _respond_to_user_node(state: RetrievalState) -> dict[str, Any]:
     generated_answer = state.get("generated_answer", {"text": "", "sources": []})
+    # The answer cites sections by the numbers they were given in; renumbered here, once
+    # the answer is final, so the employee sees [1], [2], ... for the sources it uses.
+    text, sources = number_citations(generated_answer.get("text", ""), state.get("retrieved_chunks", []))
     response: FinalResponse = {
-        "text": generated_answer.get("text", ""),
-        "sources": generated_answer.get("sources", []),
+        "text": text,
+        # An answer that cites nothing still lists where it came from.
+        "sources": sources or generated_answer.get("sources", []),
         "answered": True,
     }
     return {"final_response": response}

@@ -79,3 +79,10 @@ def test_recent_history_keeps_the_last_turns_and_shortens_long_answers() -> None
 
     assert [turn["question"] for turn in history] == ["q2", "q3", "q4", "q5"]
     assert all(len(turn["answer"]) == 600 for turn in history)
+
+
+def test_recent_history_drops_citations_from_earlier_answers() -> None:
+    # Their numbers point to sections from an earlier search, not the ones the model sees now.
+    history = recent_history([{"question": "Leave?", "answer": "You get 28 days [1]. Ask your lead first[2]."}])
+
+    assert history[0]["answer"] == "You get 28 days. Ask your lead first."

@@ -90,6 +90,45 @@ h3 {
   text-underline-offset: 2px;
 }
 
+/* A number after a sentence, opening the source it came from. Same green as the highlight
+   the source opens on, so the two read as one thing. */
+.answer .citation {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  margin-left: 0.2rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--color-cite);
+  color: var(--color-brand-deep);
+  font-size: 0.7rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  vertical-align: 0.2em;
+  transition: background-color 120ms, color 120ms;
+}
+
+.answer .citation + .citation {
+  margin-left: 0.15rem;
+}
+
+/* A bigger tap target than the number itself. */
+.answer button.citation::before {
+  content: "";
+  position: absolute;
+  inset: -0.45rem -0.2rem;
+}
+
+.answer button.citation:hover,
+.answer button.citation[aria-pressed="true"] {
+  background: var(--color-brand);
+  color: #fff;
+}
+
 /* A source document opened beside the chat. */
 .document h1,
 .document h2,
