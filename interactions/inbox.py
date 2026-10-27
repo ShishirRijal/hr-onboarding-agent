@@ -13,6 +13,7 @@ REASONS = {
     "no_sources": "No HR document matched the question.",
     "low_confidence": "The closest HR documents weren't a close enough match to answer from.",
     "answer_declined": "The HR documents mention the topic but don't answer the question.",
+    "no_relevant_sections": "Two searches found sections on nearby topics, but none that answer the question.",
 }
 DEFAULT_REASON = "The HR documents don't cover this."
 NO_DOCUMENT_TOPIC = "Not near any document"

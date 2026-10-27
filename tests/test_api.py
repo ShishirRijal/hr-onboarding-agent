@@ -91,6 +91,7 @@ class FakeGraph:
         yield "updates", {"retrieve_documents": {"retrieved_chunks": [{"metadata": {"source_doc": "leave_policy"}}]}}
         yield "updates", {"score_confidence": {"confidence_label": result["confidence_label"]}}
         if result["final_response"]["answered"]:
+            yield "updates", {"read_neighbours": {"retrieved_chunks": [{}]}}
             for token in ("Employees in Estonia ", "get 28 calendar days."):
                 yield "messages", (SimpleNamespace(content=token), {"langgraph_node": "generate_answer"})
             yield "updates", {"generate_answer": {"answer_declined": False}}
@@ -319,7 +320,7 @@ def test_chat_takes_who_is_asking_from_the_account_not_the_request(users) -> Non
     assert state["employee_context"]["department"] == "Engineering"
     assert state["employee_context"]["role"] == "Junior Backend Engineer"
     assert state["session_id"] == body["session_id"]
-    assert state["retrieval_config"] == {"apply_reranker": False}
+    assert state["retrieval_config"] == {"apply_reranker": False, "corrective_search": False}
     assert state["history"] == []
 
 

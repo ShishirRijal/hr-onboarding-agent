@@ -52,6 +52,11 @@ def parse_args() -> argparse.Namespace:
         help="Model that grades correctness and grounding.",
     )
     parser.add_argument(
+        "--corrective-search",
+        action="store_true",
+        help="Grade the found sections and search again for what they leave out (corrective RAG).",
+    )
+    parser.add_argument(
         "--no-judge",
         action="store_true",
         help="Skip the model-graded checks (correctness, grounding); behaviour, sources and country still run.",
@@ -100,7 +105,8 @@ def main() -> None:
         print(mark, end="", flush=True)
 
     print(f"Running {total} turns from {len(cases)} cases ", end="", flush=True)
-    results = run_cases(graph, cases, on_turn=progress)
+    retrieval_config = {"apply_reranker": False, "corrective_search": args.corrective_search}
+    results = run_cases(graph, cases, on_turn=progress, retrieval_config=retrieval_config)
     print()
 
     if not args.no_judge:
@@ -111,6 +117,7 @@ def main() -> None:
     meta = {
         "started_at": started_at,
         "answer_model": args.answer_model,
+        "corrective_search": args.corrective_search,
         "judge_model": None if args.no_judge else args.judge_model,
         "cases": args.cases if not args.limit else f"{args.cases} (first {args.limit})",
     }

@@ -358,7 +358,10 @@ def _initial_state(request: ChatRequest, user: User, store: Any) -> tuple[str, d
         # Who is asking comes from their account, never from the browser.
         "employee_context": user.employee_context(),
         "history": history,
-        "retrieval_config": {"apply_reranker": _env_flag("USE_COHERE_RERANK")},
+        "retrieval_config": {
+            "apply_reranker": _env_flag("USE_COHERE_RERANK"),
+            "corrective_search": _env_flag("CORRECTIVE_SEARCH"),
+        },
     }
 
 
