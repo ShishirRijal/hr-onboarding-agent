@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,12 @@ def parse_args() -> argparse.Namespace:
         "--model",
         default="BAAI/bge-small-en-v1.5",
         help="Sentence-transformers embedding model.",
+    )
+    parser.add_argument(
+        "--if-empty",
+        action="store_true",
+        help="Only ingest when the collection is missing or empty, as on a first start, and wait for "
+        "Qdrant to come up first. Used when the API starts in Docker; an existing collection is left as it is.",
     )
     return parser.parse_args()
 
@@ -126,9 +133,31 @@ def ensure_qdrant_collection(
         ) from exc
 
 
+def wait_for_qdrant(client: Any, *, attempts: int = 30) -> None:
+    for attempt in range(attempts):
+        try:
+            client.get_collections()
+            return
+        except Exception:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(1)
+
+
+def collection_has_points(client: Any, collection_name: str) -> bool:
+    return client.collection_exists(collection_name) and client.count(collection_name, exact=False).count > 0
+
+
 def main() -> None:
     load_dotenv()
     args = parse_args()
+
+    if args.if_empty:
+        client = QdrantClient(url=args.qdrant_url)
+        wait_for_qdrant(client)
+        if collection_has_points(client, args.collection):
+            print(f"Collection '{args.collection}' already has documents; not ingesting.")
+            return
 
     chunks = ingest_corpus(
         args.corpus_dir,
