@@ -10,7 +10,7 @@ from .state import AnswerCheck, ConversationTurn
 # A stronger model than the one writing, so it doesn't wave its own kind of draft through.
 DEFAULT_CHECK_MODEL = "gpt-4.1"
 
-CHECK_PROMPT = """You review a draft answer from NordTech Solutions' HR assistant before the employee sees it. You get the employee's question, the HR document sections the draft was written from, and the draft.
+CHECK_PROMPT = """You review a draft answer from NordTech Solutions' HR assistant before the employee sees it. You get the employee's question, the HR document sections the draft was written from, and the draft. The numbers in square brackets in the draft cite the sections it used.
 
 reasoning: first, in two or three sentences, say exactly what was asked and what the sections say about that specific thing.
 
@@ -68,4 +68,5 @@ def revision_feedback(check: AnswerCheck) -> str:
         lines.append(f"- Remove or correct, because the sections don't support it: {claim}")
     for detail in check["missing_details"]:
         lines.append(f"- Add, because the sections state it and it matters here: {detail}")
+    lines.append("Keep citing each fact with its section's number in square brackets.")
     return "\n".join(lines)

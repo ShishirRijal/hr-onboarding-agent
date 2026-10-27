@@ -135,6 +135,7 @@ flowchart TD
 - `read_neighbours`: documents are split into ~500-character pieces, and the condition that matters (an approver, the day a rule changes) is often in the next piece of the same section. Each found piece is read with the pieces either side of it, joined into one passage without the repeated overlap (`retrieval/context.py`). Citations still open the piece search found.
 - `grade_documents` and `search_again` are corrective RAG, off unless `CORRECTIVE_SEARCH=1`. `gpt-4.1-mini` grades whether the passages answer the whole question; if not, one more search runs for what's missing, in the policies' own words, and adds the passages that help. If neither search finds anything relevant, the employee is offered HR without an answer being written. Grading never removes passages: dropping the ones graded unhelpful cost more answers than it saved. It's off by default because, on the evaluation set, it added about a second per answer without changing the results: the first search already finds the right document for every test question, and reading neighbours brings in what was missing. It's there for real employees' phrasing, which is harder than the FAQ log's.
 - `check_answer` reviews each draft before the employee sees it (the critique step of Self-RAG, with `gpt-4.1`): a draft that talks around the question ("not covered", "case by case") becomes an offer to ask HR, and one with unsupported claims or a missing condition is rewritten once by `revise_answer`. Because of this, answers aren't streamed while they're written; the progress steps show the check instead.
+- `respond_to_user` turns the answer's citations into numbered sources. The answer model marks each sentence or list item with the passage it came from; these are renumbered in the order the answer first uses them, and a source keeps its number every time it's cited, so the employee sees [1], [2], ... for exactly the sources used, however many there are (`agent/citations.py`). Earlier answers are given to the models without their numbers, since those point to another search's passages.
 - `answer_not_found` asks the employee whether to send the question to HR; nothing is sent until they say yes.
 
 ## Corpus
@@ -240,7 +241,7 @@ npm run dev
 
 Open http://localhost:3000 and sign in with one of the [demo accounts](#demo-accounts). The web app proxies `/api/*` to the API; set `HR_API_URL` if the API runs somewhere other than `http://localhost:8010`.
 
-Answers stream in with their sources. When the documents don't cover a question, the assistant says so and asks whether to send it to HR; nothing goes to HR unless the employee says yes. HR's answer appears in that chat, and the chat is marked in the sidebar until the employee opens it. The profile page shows the employee's details as the assistant sees them.
+Answers mark their sources inline as numbers after each sentence; clicking a number opens that document beside the chat, with the part the answer used highlighted. When the documents don't cover a question, the assistant says so and asks whether to send it to HR; nothing goes to HR unless the employee says yes. HR's answer appears in that chat, and the chat is marked in the sidebar until the employee opens it. The profile page shows the employee's details as the assistant sees them.
 
 ### Sign-in
 
@@ -297,6 +298,7 @@ PYTHONPATH=. poetry run pytest
 
 - **Behaviour**: answered, offered to ask HR, or chatted, as expected
 - **Cited the right document** and **searched the right country**
+- **Answers with citations**: how many answers mark their sources (reported, not part of passing)
 - **Correctness** against the expected answer, and **grounding** (every claim backed by the sections the answer was written from), both graded by a stronger model (`gpt-4.1` by default)
 
 ```bash

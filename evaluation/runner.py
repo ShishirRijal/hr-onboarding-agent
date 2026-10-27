@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from agent.citations import has_citations, strip_citations
 from agent.conversation import MESSAGE_CHAT
 
 from .cases import EXPECT_ANSWER, EXPECT_CHAT, EXPECT_NOT_FOUND, EvalCase, EvalTurn
@@ -39,6 +40,8 @@ class TurnResult:
     sources_ok: bool | None = None
     country_ok: bool | None = None
     mentions_ok: bool | None = None
+    # Whether an answer marks where its facts come from, with [1], [2], ...; not part of passing.
+    cites: bool | None = None
     correctness: str | None = None
     correctness_reason: str | None = None
     grounding: str | None = None
@@ -153,6 +156,8 @@ def _check(result: TurnResult, turn: EvalTurn) -> None:
         result.sources_ok = any(source in result.cited_sources for source in turn.sources)
     if turn.country and result.outcome in (EXPECT_ANSWER, EXPECT_NOT_FOUND):
         result.country_ok = result.searched_country == turn.country
+    if result.outcome == EXPECT_ANSWER:
+        result.cites = has_citations(result.answer)
     if turn.mentions:
         reply = result.answer.lower()
         result.mentions_ok = all(word.lower() in reply for word in turn.mentions)
@@ -176,11 +181,11 @@ def judge_results(
             verdict = judge.correctness(
                 result.message,
                 result.expected_answer,
-                result.answer,
+                strip_citations(result.answer),
                 histories.get((result.case_id, result.turn), []),
             )
             result.correctness, result.correctness_reason = verdict.verdict, verdict.reason
-        verdict = judge.grounding(result.answer, result.sections)
+        verdict = judge.grounding(strip_citations(result.answer), result.sections)
         result.grounding, result.grounding_reason = verdict.verdict, verdict.reason
         result.unsupported_claims = list(verdict.unsupported_claims)
 
@@ -194,7 +199,7 @@ def _histories(results: Sequence[TurnResult]) -> dict[tuple[str, int], list[dict
     for result in results:
         earlier = running.setdefault(result.case_id, [])
         histories[(result.case_id, result.turn)] = list(earlier)
-        earlier.append({"question": result.message, "answer": result.answer})
+        earlier.append({"question": result.message, "answer": strip_citations(result.answer)})
     return histories
 
 
@@ -219,6 +224,7 @@ def summarize(results: Sequence[TurnResult]) -> dict[str, Any]:
         "sources": rate([result.sources_ok for result in results if result.sources_ok is not None]),
         "country": rate([result.country_ok for result in results if result.country_ok is not None]),
         "mentions": rate([result.mentions_ok for result in results if result.mentions_ok is not None]),
+        "cites": rate([result.cites for result in results if result.cites is not None]),
         "errors": sum(result.outcome == OUTCOME_ERROR for result in results),
         "median_seconds": statistics.median(result.seconds for result in results) if results else None,
     }
@@ -273,6 +279,8 @@ def format_summary(summary: dict[str, Any], previous: dict[str, Any] | None = No
         line("Cited right document", "sources"),
         line("Searched right country", "country"),
     ]
+    if summary.get("cites", {}).get("total"):
+        lines.append(line("Answers with citations", "cites"))
     if summary["mentions"]["total"]:
         lines.append(line("Mentions", "mentions"))
     if summary["errors"]:

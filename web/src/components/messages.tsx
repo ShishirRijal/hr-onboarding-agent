@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import Markdown from "react-markdown";
+import Markdown, { type Components } from "react-markdown";
 import { documentTitle, sectionLabel } from "@/lib/documents";
 import { formatDateTime } from "@/lib/format";
 import type { AssistantMessage, HrReply, Source, UserMessage } from "@/lib/types";
@@ -111,15 +111,73 @@ function ReplyBody({
     return <NotFound message={message} text={text} typing={typing} onChooseHr={onChooseHr} />;
   }
 
+  // Answers mark where each fact comes from with [1], [2], ...; older ones list their sources below.
+  const cited = CITATION.test(message.text);
+  const components: Components = {
+    a({ href, children }) {
+      const number = Number(href?.match(/^#source-(\d+)$/)?.[1]);
+      if (!number) return <a href={href}>{children}</a>;
+      const source = message.sources[number - 1];
+      return (
+        <Citation
+          number={number}
+          source={source}
+          open={!!source && source.chunk_id === openChunkId}
+          onOpen={onOpenSource}
+        />
+      );
+    },
+  };
+
   return (
     <div>
       <div className={`answer ${typing ? "is-typing" : ""}`}>
-        <Markdown>{text}</Markdown>
+        <Markdown components={components}>{linkCitations(text, typing)}</Markdown>
       </div>
-      {!typing && message.status === "done" && message.sources.length > 0 && (
+      {!cited && !typing && message.status === "done" && message.sources.length > 0 && (
         <SourceList sources={message.sources} openChunkId={openChunkId} onOpen={onOpenSource} />
       )}
     </div>
+  );
+}
+
+// [n] cites message.sources[n - 1]. A "[n](...)" is a Markdown link, not a citation.
+const CITATION = /\[(\d+)\](?!\()/;
+
+// Citations become links so Markdown keeps them inline, in lists and bold text alike.
+function linkCitations(text: string, typing: boolean): string {
+  // While the answer types out, a half-written "[1" would flash up as text.
+  const shown = typing ? text.replace(/\[\d*$/, "") : text;
+  return shown.replace(new RegExp(CITATION.source, "g"), (_, number: string) => `[${number}](#source-${number})`);
+}
+
+function Citation({
+  number,
+  source,
+  open,
+  onOpen,
+}: {
+  number: number;
+  source: Source | undefined;
+  open: boolean;
+  onOpen: (source: Source, opener: HTMLElement) => void;
+}) {
+  // The sources arrive with the finished answer, a moment after its text.
+  if (!source) {
+    return <span className="citation">{number}</span>;
+  }
+  const label = [documentTitle(source), sectionLabel(source)].filter(Boolean).join(", ");
+  return (
+    <button
+      type="button"
+      onClick={(event) => onOpen(source, event.currentTarget)}
+      aria-pressed={open}
+      aria-label={`Source ${number}: ${label}`}
+      title={label}
+      className="citation"
+    >
+      {number}
+    </button>
   );
 }
 

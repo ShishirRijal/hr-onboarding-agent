@@ -1065,3 +1065,42 @@ def test_second_search_finding_nothing_new_keeps_the_first_grade() -> None:
     assert len(calls) == 1
     assert result["final_response"]["answered"] is True
     assert result["document_grade"]["searched_again"] is True
+
+
+def test_retrieval_graph_shows_only_the_sources_the_answer_cites() -> None:
+    def chunk(chunk_id: str, section: str) -> RetrievedChunk:
+        return RetrievedChunk(
+            chunk_id=chunk_id,
+            text=f"{section} text.",
+            metadata={"source_doc": "leave_policy", "source_file": "leave_absence_policy.md", "section_path": section},
+            score=0.9,
+            source="fused",
+            ranks={"dense": 1, "bm25": 1},
+            scores={"dense": 0.9, "bm25": 10.0, "fused": 0.5},
+        )
+
+    def cite_the_second(question, chunks, **kwargs):
+        return "Kela pays from day 10 [2]. Tell your lead [2]."
+
+    engine = RetrievalEngine(
+        client=SimpleNamespace(),
+        collection_name="nordtech_hr",
+        embedding_model=SimpleNamespace(),
+        bm25_index=SimpleNamespace(),
+    )
+    graph = build_retrieval_graph(
+        engine,
+        retriever=FakeRetriever([chunk("c-1", "1. Estonia"), chunk("c-2", "3. Finland"), chunk("c-3", "4. Portugal")]),
+        answer_generator=cite_the_second,
+        message_router=route_to_hr,
+        answer_checker=approve_answer,
+        document_grader=keep_every_section,
+        state_graph_cls=FakeStateGraph,
+        start_token="__start__",
+        end_token="__end__",
+    )
+
+    result = graph.invoke({"question": "Who pays sick leave in Finland?"})
+
+    assert result["final_response"]["text"] == "Kela pays from day 10[1]. Tell your lead[1]."
+    assert [source["chunk_id"] for source in result["final_response"]["sources"]] == ["c-2"]
