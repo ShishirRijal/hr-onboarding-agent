@@ -5,6 +5,7 @@ from typing import Any, TypedDict
 
 class EmployeeContext(TypedDict, total=False):
     employee_id: str
+    employee_name: str
     employee_country: str
     office_country: str
     office_location: str

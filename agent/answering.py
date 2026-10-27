@@ -56,6 +56,10 @@ def describe_employee(employee_context: EmployeeContext) -> str:
     return f"based in {place}" if place else ""
 
 
+def first_name(employee_context: EmployeeContext) -> str:
+    return (employee_context.get("employee_name") or "").split(" ")[0]
+
+
 def history_messages(history: Sequence[ConversationTurn]) -> list[tuple[str, str]]:
     messages: list[tuple[str, str]] = []
     for turn in history:
@@ -83,6 +87,7 @@ def _build_messages(
     employee_context: EmployeeContext,
 ) -> list[tuple[str, str]]:
     employee = describe_employee(employee_context)
+    name = first_name(employee_context)
     # Earlier turns come first so follow-ups like "and in Finland?" read naturally.
     return [
         ("system", SYSTEM_PROMPT),
@@ -92,7 +97,8 @@ def _build_messages(
             "\n\n".join(
                 part
                 for part in [
-                    f"The employee is {employee}." if employee else "",
+                    f"The employee is {name + ', ' if name else ''}{employee}." if employee else "",
+                    _greeting_note(name, first_message=not history),
                     f"Question:\n{question.strip()}",
                     f"HR document excerpts:\n{_format_chunks(chunks)}",
                 ]
@@ -100,6 +106,15 @@ def _build_messages(
             ),
         ),
     ]
+
+
+def _greeting_note(name: str, *, first_message: bool) -> str:
+    # Greeting once per chat reads friendly; using the name in every answer reads scripted.
+    if name and first_message:
+        note = f'This is their first message in this chat: open with "Hi {name}," and then answer.'
+    else:
+        note = "You're mid-conversation: answer directly, without a greeting or their name."
+    return note + " End when the answer is complete, with no closing offer of more help."
 
 
 def _format_chunks(chunks: list[dict[str, Any]]) -> str:
