@@ -28,6 +28,7 @@ dependencies = [
     "langsmith>=0.1",
     "rank-bm25>=0.2",
     "langchain-text-splitters (>=1.1.2,<2.0.0)",
+    "langfuse (>=5.0.4,<6)",
 ]
 
 [project.optional-dependencies]

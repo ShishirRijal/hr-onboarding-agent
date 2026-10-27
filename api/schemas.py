@@ -184,6 +184,15 @@ class ReviewPage(BaseModel):
     total: int
 
 
+class InteractionUsage(BaseModel):
+    """The model calls one question took."""
+
+    calls: int
+    tokens: int
+    cost_usd: float
+    models: list[str]
+
+
 class ReviewDetail(ReviewItem):
     sources: list[Source]
     confidence_label: str
@@ -192,6 +201,7 @@ class ReviewDetail(ReviewItem):
     # HR's reply from the inbox, when the employee sent the question to HR.
     hr_answer: str | None = None
     review_answer: str | None = None
+    usage: InteractionUsage | None = None
     earlier_turns: list[ConversationTurnOut]
 
 
@@ -213,3 +223,55 @@ class HROverview(BaseModel):
     unhelpful_to_review: int
     common_topics: list[TopicCount]
     topics_since: UtcDatetime
+
+
+class UsageNumbers(BaseModel):
+    calls: int
+    input_tokens: int
+    cached_input_tokens: int
+    output_tokens: int
+    # At list prices; calls to a model without a known price are counted in unpriced_calls.
+    cost_usd: float
+    unpriced_calls: int
+    # Employees' questions the calls were for.
+    questions: int
+
+
+class UsagePeriod(UsageNumbers):
+    key: str
+    label: str
+    since: UtcDatetime
+
+
+class UsageRow(UsageNumbers):
+    # A model, an agent step, or a source ("chat", "evaluation", "script").
+    name: str
+
+
+class UsageBudget(BaseModel):
+    # None when MONTHLY_BUDGET_USD isn't set.
+    monthly_limit_usd: float | None
+    spent_usd: float
+    remaining_usd: float | None
+
+
+class ModelPrice(BaseModel):
+    model: str
+    # US dollars per million tokens.
+    input_usd: float
+    cached_input_usd: float
+    output_usd: float
+
+
+class UsageReport(BaseModel):
+    periods: list[UsagePeriod]
+    # The period the breakdowns below cover.
+    period: str
+    budget: UsageBudget
+    by_model: list[UsageRow]
+    by_step: list[UsageRow]
+    by_source: list[UsageRow]
+    questions: int
+    average_tokens_per_question: int | None
+    average_cost_per_question_usd: float | None
+    prices: list[ModelPrice]

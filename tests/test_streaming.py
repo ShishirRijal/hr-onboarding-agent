@@ -6,7 +6,7 @@ from api.streaming import stream_agent
 
 
 class FakeStreamingGraph:
-    def stream(self, state, stream_mode):
+    def stream(self, state, stream_mode, config=None):
         assert stream_mode == ["updates", "messages"]
         yield "updates", {"resolve_filters": {"resolved_filters": {}}}
         yield "updates", {"retrieve_documents": {"retrieved_chunks": []}}
@@ -32,7 +32,7 @@ def test_stream_agent_reports_statuses_and_merges_the_final_state() -> None:
 
 
 class FakeChatGraph:
-    def stream(self, state, stream_mode):
+    def stream(self, state, stream_mode, config=None):
         yield "messages", (SimpleNamespace(content='{"kind": "chat"}'), {"langgraph_node": "understand_message"})
         yield "updates", {"understand_message": {"message_route": {"kind": "chat", "search_query": ""}}}
         yield "messages", (SimpleNamespace(content="Hi "), {"langgraph_node": "reply_in_chat"})
@@ -49,7 +49,7 @@ def test_stream_agent_streams_chat_replies_but_not_routing() -> None:
 
 
 class FakeCheckedAnswerGraph:
-    def stream(self, state, stream_mode):
+    def stream(self, state, stream_mode, config=None):
         yield "updates", {"score_confidence": {"confidence_label": "medium"}}
         yield "updates", {"read_neighbours": {"retrieved_chunks": [{}, {}]}}
         # A draft is never streamed: only checked answers reach the employee.
@@ -73,7 +73,7 @@ class FakeCorrectedSearchGraph:
     def __init__(self, found: bool) -> None:
         self.found = found
 
-    def stream(self, state, stream_mode):
+    def stream(self, state, stream_mode, config=None):
         yield "updates", {"score_confidence": {"confidence_label": "medium"}}
         yield "updates", {"read_neighbours": {"retrieved_chunks": [{}, {}]}}
         yield "updates", {"grade_documents": {"document_grade": {"coverage": "partial"}}}

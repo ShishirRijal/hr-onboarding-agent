@@ -41,11 +41,15 @@ class GroundingVerdict(BaseModel):
 
 
 class Judge:
-    def __init__(self, *, llm: Any | None = None, model: str = DEFAULT_JUDGE_MODEL) -> None:
+    def __init__(
+        self, *, llm: Any | None = None, model: str = DEFAULT_JUDGE_MODEL, callbacks: list[Any] | None = None
+    ) -> None:
         self.model = model
         client = llm or _load_default_llm(model=model)
-        self._correctness = client.with_structured_output(CorrectnessVerdict)
-        self._grounding = client.with_structured_output(GroundingVerdict)
+        # Callbacks count the judge's tokens, which cost as much as the answers they grade.
+        config = {"callbacks": callbacks} if callbacks else {}
+        self._correctness = client.with_structured_output(CorrectnessVerdict).with_config(config)
+        self._grounding = client.with_structured_output(GroundingVerdict).with_config(config)
 
     def correctness(
         self,

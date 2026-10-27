@@ -5,13 +5,14 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
     Float,
+    Integer,
     String,
     Table,
     Text,
@@ -98,6 +99,32 @@ class Interaction(Base):
     debug: Mapped[dict[str, Any]] = mapped_column(JSON)
 
 
+# What a model call was for: an employee's question, an evaluation run, or a script.
+USAGE_CHAT = "chat"
+USAGE_EVALUATION = "evaluation"
+USAGE_SCRIPT = "script"
+
+
+class ModelUsage(Base):
+    """One call to a language model, with the tokens it used and what it cost."""
+
+    __tablename__ = "model_calls"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    source: Mapped[str] = mapped_column(String(16), index=True)
+    # The question it answered; None for evaluation runs and calls that failed before logging.
+    interaction_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    model: Mapped[str] = mapped_column(String(64))
+    # The agent step that made the call, like "generate_answer" or "check_answer".
+    step: Mapped[str | None] = mapped_column(String(64))
+    input_tokens: Mapped[int] = mapped_column(Integer)
+    cached_input_tokens: Mapped[int] = mapped_column(Integer)
+    output_tokens: Mapped[int] = mapped_column(Integer)
+    # At the list price when the call was made; None for a model without a known price.
+    cost_usd: Mapped[float | None] = mapped_column(Float)
+
+
 @dataclass(slots=True)
 class ChatSession:
     """One of a user's chats, as listed in the sidebar."""
@@ -115,6 +142,7 @@ class InteractionStore:
         self._engine = create_engine(url)
         Base.metadata.create_all(self._engine)
         add_missing_columns(self._engine, Interaction.__table__)
+        add_missing_columns(self._engine, ModelUsage.__table__)
         self._sessions = sessionmaker(self._engine, expire_on_commit=False)
 
     def log(self, state: Mapping[str, Any]) -> str:
@@ -388,6 +416,44 @@ class InteractionStore:
                 .order_by(Interaction.created_at)
             )
             return list(session.scalars(query))
+
+    def record_model_calls(
+        self,
+        calls: Iterable[Any],
+        *,
+        source: str,
+        interaction_id: str | None = None,
+        at: datetime | None = None,
+    ) -> None:
+        """Saves model calls from a UsageTracker (anything with the same attributes)."""
+        moment = at or datetime.now(timezone.utc)
+        rows = [
+            ModelUsage(
+                at=moment,
+                source=source,
+                interaction_id=interaction_id,
+                model=call.model,
+                step=call.step,
+                input_tokens=call.input_tokens,
+                cached_input_tokens=call.cached_input_tokens,
+                output_tokens=call.output_tokens,
+                cost_usd=call.cost_usd,
+            )
+            for call in calls
+        ]
+        if not rows:
+            return
+        with self._sessions.begin() as session:
+            session.add_all(rows)
+
+    def model_calls_since(self, since: datetime) -> list[ModelUsage]:
+        with self._sessions() as session:
+            query = select(ModelUsage).where(ModelUsage.at >= since).order_by(ModelUsage.at)
+            return list(session.scalars(query))
+
+    def interaction_model_calls(self, interaction_id: str) -> list[ModelUsage]:
+        with self._sessions() as session:
+            return list(session.scalars(select(ModelUsage).where(ModelUsage.interaction_id == interaction_id)))
 
     def list_escalations(self, *, since: datetime | None = None) -> list[Interaction]:
         with self._sessions() as session:

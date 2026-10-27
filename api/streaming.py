@@ -14,12 +14,14 @@ def sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def stream_agent(graph: Any, state: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
+def stream_agent(
+    graph: Any, state: dict[str, Any], *, config: dict[str, Any] | None = None
+) -> Iterator[tuple[str, dict[str, Any]]]:
     """Runs the graph and yields (event, payload) pairs: status updates, chat tokens,
     and a final "done" payload with the full result."""
     result = dict(state)
 
-    for mode, chunk in graph.stream(state, stream_mode=["updates", "messages"]):
+    for mode, chunk in graph.stream(state, stream_mode=["updates", "messages"], config=config):
         if mode == "messages":
             message, metadata = chunk
             content = getattr(message, "content", "")

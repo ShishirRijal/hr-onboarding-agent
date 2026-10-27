@@ -138,6 +138,25 @@ flowchart TD
 - `respond_to_user` turns the answer's citations into numbered sources. The answer model marks each sentence or list item with the passage it came from; these are renumbered in the order the answer first uses them, and a source keeps its number every time it's cited, so the employee sees [1], [2], ... for exactly the sources used, however many there are (`agent/citations.py`). Earlier answers are given to the models without their numbers, since those point to another search's passages.
 - `answer_not_found` asks the employee whether to send the question to HR; nothing is sent until they say yes.
 
+## Results
+
+Measured with `scripts/eval_answers.py` on 95 turns: the 76 questions in HR's FAQ log and 19 turns of multi-turn conversations. Of those, 75 can be answered from the documents, 13 should go to HR, and 7 are small talk; `gpt-4.1` grades correctness and grounding. Each row adds one upgrade to the one above.
+
+| Upgrade | Turns fully passing | Correct answers | Sent to HR when they should be | Fully grounded answers | Median time |
+|---|---|---|---|---|---|
+| First version | 75/95 | 67/75 | 10/13 | 66/77 | 2.5 s |
+| Prompt fixes | 84/95 | 70/75 | 8/13 | 78/80 | 2.2 s |
+| Self-check | 88/95 | 72/75 | 11/13 | 74/77 | 3.5 s |
+| Reading neighbouring sections | **90/95** | **73/75** | **11/13** | 75/77 | 3.7 s |
+| Numbered citations | **90/95** | 72/75 | **11/13** | **77/77** | 4.0 s |
+
+- **Prompt fixes**: steps only from the documents, every condition kept, and a country named in the question honoured.
+- **Self-check**: `gpt-4.1` reviews each draft before the employee sees it (the critique step of Self-RAG). Drafts that talk around the question go to HR, and ones with an unsupported claim or a missing condition are rewritten. Questions that should go to HR got there 11 times out of 13, up from 8.
+- **Reading neighbouring sections** (corrective RAG): each section search finds is read with the sections either side of it, which brought in the details search alone missed, such as Finance's approval over €300 and Kela paying sick leave from day 10.
+- **Numbered citations**: every answer marks where each fact comes from, and every answer was fully grounded.
+
+Search finds the right document first for 91% of the 65 answerable FAQ questions, and in the top five for all of them (hit@1 0.908, hit@5 1.000, MRR 0.949), with BM25 and BGE combined by reciprocal rank fusion.
+
 ## Corpus
 
 The knowledge base lives in `corpus/` and includes:
@@ -175,10 +194,22 @@ The build order is also intentional: document ingestion comes first, then retrie
 
 ## Run It Locally
 
-Create a `.env` file from `.env.example` and set at least:
+Create a `.env` file from `.env.example` and set at least `OPENAI_API_KEY`.
+
+### With Docker
 
 ```bash
-OPENAI_API_KEY=sk-...
+cp .env.example .env          # then add OPENAI_API_KEY
+docker compose up --build
+```
+
+This starts everything: Qdrant, Mailpit, the API and the web app. Open http://localhost:3000 and sign in with one of the [demo accounts](#demo-accounts). On the first start the API loads the corpus into Qdrant and adds the demo accounts; after that it leaves both as they are. Chats, the HR inbox and accounts are kept in `./data`, shared with runs outside Docker, and Mailpit's inbox for the HR digest is at http://localhost:8025. The API image runs PyTorch on the CPU and includes the embedding model, so the first build takes a few minutes. Give Docker at least 4 GB of memory: loading the corpus needs more than the 2 GB some setups (Colima, for one) start with.
+
+### Without Docker
+
+For the API outside Docker, `.env` also needs:
+
+```bash
 QDRANT_URL=http://localhost:6333
 QDRANT_COLLECTION=nordtech_hr
 ```
@@ -188,7 +219,7 @@ QDRANT_COLLECTION=nordtech_hr
 **1. Start Qdrant and Mailpit, and ingest the corpus**
 
 ```bash
-docker compose up -d
+docker compose up -d qdrant mailpit
 PYTHONPATH=. poetry run python scripts/ingest.py
 ```
 
@@ -223,6 +254,7 @@ HR team only (`403` for employees):
 - `GET /hr/review?show=all|unhelpful|helpful|not_answered|reviewed&offset=0&limit=30`: every logged question for the answer review, newest first, with the total. Anonymous: only the asker's country, with their name taken out of the question and answer
 - `GET /hr/review/{interaction_id}`: one question with the answer's sources, the employee's rating, HR's review and the earlier turns of the chat
 - `POST /hr/review/{interaction_id}`: `{"verdict": "correct" | "corrected", "answer": "..."}` saves HR's review; `corrected` needs the answer HR would have given. Reviewing again replaces it
+- `GET /hr/usage?period=day|week|month|year`: tokens and cost of the assistant's model calls for today, this week, this month and this year, the monthly limit, and that period's split by model, by agent step and by source
 
 Every question is logged to `data/interactions.db` with the user who asked (`user_id`). Questions the documents can't answer have `answered = 0` and `escalation_status` set to `offered`, then `requested` or `declined` once the employee chooses, or `dismissed` if they ask something else without choosing; the ones sent to HR also have `escalated = 1`, and become `answered` when HR replies from the HR inbox (`hr_answer`, `hr_answered_by`, `hr_answered_at`).
 
@@ -246,12 +278,6 @@ npm run dev
 Open http://localhost:3000 and sign in with one of the [demo accounts](#demo-accounts). The web app proxies `/api/*` to the API; set `HR_API_URL` if the API runs somewhere other than `http://localhost:8010`.
 
 Answers mark their sources inline as numbers after each sentence; clicking a number opens that document beside the chat, with the part the answer used highlighted. When the documents don't cover a question, the assistant says so and asks whether to send it to HR; nothing goes to HR unless the employee says yes. HR's answer appears in that chat, and the chat is marked in the sidebar until the employee opens it. The profile page shows the employee's details as the assistant sees them.
-
-### Sign-in
-
-Nobody can use the app or the API without signing in. Accounts live in the same SQLite database as the interactions (`users` table), with passwords hashed with scrypt and a per-user salt. Signing in creates a row in `auth_sessions` and sets an HttpOnly, SameSite=Lax cookie holding a random token; only a hash of the token is stored, and signing out deletes the row, so the cookie stops working everywhere. Sessions last 7 days. The web app reaches the API through its own `/api` proxy, so the cookie is first-party. Set `SESSION_COOKIE_SECURE=true` when serving over HTTPS.
-
-There are two roles: `employee` uses the chat, `hr` also has the HR platform. After signing in, HR lands in the HR inbox and employees in the chat.
 
 ### Demo accounts
 
@@ -281,6 +307,8 @@ HR writes an answer and chooses who it applies to: employees in the asker's coun
 The answered list keeps every question HR has answered. Answers cited by the assistant open in the source viewer like any other source.
 
 Employees rate answers with a thumbs up or down under each one, and a thumbs down asks what was wrong. The **answer review** lists every question employees have asked the assistant, newest first, filtered by all, marked unhelpful, marked helpful, not answered, or reviewed. It doesn't say who asked: only the country whose rules applied, with the employee's name replaced by `[name]` in what was said (answers greet employees by first name). The sidebar counts answers marked unhelpful that haven't been reviewed yet. For each answer HR can mark it right, or write the answer they would have given. Reviews are kept to test and improve the assistant: the employee doesn't see them, and unlike inbox answers they aren't added to the knowledge base. The chat tells employees that HR reviews chats without names.
+
+**Usage.** Every OpenAI call is counted with the model, the agent step that made it (understanding the message, writing the answer, checking it, ...), its input, cached and output tokens, and its cost at OpenAI's list prices (`agent/usage.py`), in the `model_calls` table. The Usage page shows what the assistant cost today, this week, this month and this year, what an employee's question takes on average, and where the money goes by model, by step, and by source: employees' questions, evaluation runs, or questions from `scripts/ask_agent.py`. Each question in the answer review shows its own tokens and cost. With `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` set, every question's run is also traced in [Langfuse](https://langfuse.com): each step's prompt, output, tokens and time, grouped by chat. Everyone's name is replaced with `[name]` and email addresses with `[email]` before anything is sent, and the employee's job, department and start date are left out; the user is their account id (`agent/tracing.py`). Set `MONTHLY_BUDGET_USD` to cap the month: once it's reached, the assistant stops answering until next month and points employees to HR by email, and the page shows how much of the limit is used.
 
 `scripts/export_examples.py` writes every rated or reviewed answer to `data/exports/examples.jsonl` (the chat before it, the answer and its sources, the rating and comment, HR's review), and the answers HR rewrote to `data/exports/preference_pairs.jsonl` as preference pairs in OpenAI's DPO fine-tuning format, HR's answer preferred over the assistant's. Both are anonymous in the same way as the review.
 
@@ -318,7 +346,7 @@ PYTHONPATH=. poetry run python scripts/eval_answers.py                      # ev
 PYTHONPATH=. poetry run python scripts/eval_answers.py --cases conversations --limit 3
 PYTHONPATH=. poetry run python scripts/eval_answers.py --answer-model gpt-4.1-mini --out-dir data/evaluations/gpt-4.1-mini
 PYTHONPATH=. poetry run python scripts/eval_answers.py --corrective-search  # with corrective RAG switched on
-PYTHONPATH=. poetry run python scripts/eval_answers.py --no-judge          # free checks only
+PYTHONPATH=. poetry run python scripts/eval_answers.py --no-judge          # skip the gpt-4.1 grading
 ```
 
-Each run prints a summary next to the previous run's numbers and saves a JSON and a Markdown report to `data/evaluations/`; the Markdown lists every failing turn with what was expected, what the agent said, and why it failed. Evaluation runs don't write to the interactions database.
+A full run is several hundred OpenAI calls, so the script says how many turns it will run and waits for `y` before starting; `--yes` skips the question. Each run prints a summary next to the previous run's numbers, then its calls, tokens and cost per model, and saves a JSON and a Markdown report to `data/evaluations/`; the Markdown lists every failing turn with what was expected, what the agent said, and why it failed. Evaluation runs don't add chats to the interactions database, but their model calls are counted on the Usage page.

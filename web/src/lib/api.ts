@@ -15,6 +15,8 @@ import type {
   ReviewVerdict,
   SessionMessage,
   SourcePassage,
+  UsagePeriodKey,
+  UsageReport,
   User,
 } from "./types";
 
@@ -210,4 +212,8 @@ export function saveReview(interactionId: string, verdict: ReviewVerdict, answer
     method: "POST",
     body: JSON.stringify({ verdict, answer: answer ?? null }),
   });
+}
+
+export function fetchUsageReport(period: UsagePeriodKey): Promise<UsageReport> {
+  return request<UsageReport>(`/hr/usage?period=${period}`);
 }
