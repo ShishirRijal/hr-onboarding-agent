@@ -91,13 +91,27 @@ def run_cases(
     forward the way the API does. `callbacks` go to every run, to count the tokens used."""
     results: list[TurnResult] = []
     for case in cases:
-        history: list[dict[str, str]] = []
+        history: list[dict[str, Any]] = []
+        memory: dict[str, Any] | None = None
         for index, turn in enumerate(case.turns, start=1):
-            result = _run_turn(
-                graph, case, index, turn, history, retrieval_config or {"apply_reranker": False}, callbacks
+            result, final = _run_turn(
+                graph, case, index, turn, history, memory, retrieval_config or {"apply_reranker": False}, callbacks
             )
             results.append(result)
-            history.append({"question": turn.message, "answer": result.answer})
+            # The turn as the API stores it, and the chat's summary once it's long enough.
+            history.append(
+                {
+                    "question": turn.message,
+                    "answer": result.answer,
+                    "kind": (final.get("message_route") or {}).get("kind", "hr"),
+                    "sources": [
+                        source["chunk_id"]
+                        for source in (final.get("final_response") or {}).get("sources", [])
+                        if source.get("chunk_id")
+                    ],
+                }
+            )
+            memory = final.get("memory") or memory
             if on_turn:
                 on_turn(result)
     return results
@@ -108,15 +122,17 @@ def _run_turn(
     case: EvalCase,
     index: int,
     turn: EvalTurn,
-    history: list[dict[str, str]],
+    history: list[dict[str, Any]],
+    memory: dict[str, Any] | None,
     retrieval_config: dict[str, Any],
     callbacks: list[Any] | None = None,
-) -> TurnResult:
+) -> tuple[TurnResult, dict[str, Any]]:
     started = time.perf_counter()
     state = {
         "question": turn.message,
         "employee_context": case.employee_context,
         "history": list(history),
+        **({"memory": dict(memory)} if memory else {}),
         "retrieval_config": dict(retrieval_config),
     }
     try:
@@ -151,7 +167,7 @@ def _run_turn(
         error=error,
     )
     _check(result, turn)
-    return result
+    return result, final
 
 
 def _check(result: TurnResult, turn: EvalTurn) -> None:

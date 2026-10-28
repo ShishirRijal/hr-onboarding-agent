@@ -15,6 +15,7 @@ const PERIODS: { value: UsagePeriodKey; label: string }[] = [
 
 // The agent steps that call a model, in words for HR.
 const STEPS: Record<string, string> = {
+  remember_conversation: "Summarising long chats",
   understand_message: "Understanding the message",
   reply_in_chat: "Small talk replies",
   generate_answer: "Writing the answer",

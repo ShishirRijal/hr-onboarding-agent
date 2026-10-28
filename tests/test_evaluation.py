@@ -85,6 +85,20 @@ def test_the_shipped_conversations_load() -> None:
     assert all(turn.expect in {"answer", "not_found", "chat"} for case in cases for turn in case.turns)
 
 
+def test_conversations_carry_what_was_cited_and_the_chats_summary_forward() -> None:
+    first = _answer("28 days [1].")
+    first["final_response"]["sources"] = [{"source_doc": "leave_policy", "chunk_id": "c1"}]
+    first["memory"] = {"summary": "- Asked about leave.", "turns_covered": 1}
+    graph = FakeGraph({"hi": _chat("Hi!"), "leave?": first, "and carry-over?": _answer("5 days [1].")})
+    turns = [EvalTurn("hi", "chat"), EvalTurn("leave?", "answer"), EvalTurn("and carry-over?", "answer")]
+
+    run_cases(graph, [EvalCase(id="memory", office="tallinn", turns=turns)])
+
+    assert "memory" not in graph.states[1]
+    assert graph.states[2]["memory"] == {"summary": "- Asked about leave.", "turns_covered": 1}
+    assert [(turn["kind"], turn["sources"]) for turn in graph.states[2]["history"]] == [("chat", []), ("hr", ["c1"])]
+
+
 def test_conversations_carry_history_forward_and_checks_run() -> None:
     graph = FakeGraph(
         {
@@ -103,7 +117,9 @@ def test_conversations_carry_history_forward_and_checks_run() -> None:
 
     first, second = run_cases(graph, [case])
 
-    assert graph.states[1]["history"] == [{"question": "how much vacation?", "answer": "You get 28 calendar days."}]
+    assert graph.states[1]["history"] == [
+        {"question": "how much vacation?", "answer": "You get 28 calendar days.", "kind": "hr", "sources": []}
+    ]
     assert graph.states[0]["employee_context"]["office_location"] == "Tallinn"
     assert first.behaviour_ok and first.sources_ok and first.country_ok
     assert second.country_ok is False

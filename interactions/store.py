@@ -93,6 +93,10 @@ class Interaction(Base):
     reviewed_by_id: Mapped[str | None] = mapped_column(String(36))
     confidence_score: Mapped[float] = mapped_column(Float)
     confidence_label: Mapped[str] = mapped_column(String(16))
+    # The chat's memory when this question was answered: the older turns summarised, and
+    # how many turns from the start of the chat the summary covers. None until a chat is long.
+    memory_summary: Mapped[str | None] = mapped_column(Text)
+    memory_turns: Mapped[int | None] = mapped_column(Integer)
     employee_context: Mapped[dict[str, Any]] = mapped_column(JSON)
     sources: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     hr_handoff: Mapped[dict[str, Any] | None] = mapped_column(JSON)
@@ -149,6 +153,7 @@ class InteractionStore:
         response = state.get("final_response", {}) or {}
         handoff = state.get("hr_handoff")
         answered = bool(response.get("answered", True))
+        memory = state.get("memory") or {}
         interaction = Interaction(
             id=str(uuid.uuid4()),
             created_at=datetime.now(timezone.utc),
@@ -163,6 +168,8 @@ class InteractionStore:
             escalation_reason=handoff.get("reason") if handoff else None,
             confidence_score=float(state.get("confidence_score", 0.0)),
             confidence_label=str(state.get("confidence_label", "low")),
+            memory_summary=memory.get("summary") or None,
+            memory_turns=memory.get("turns_covered") if memory.get("summary") else None,
             employee_context=dict(state.get("employee_context", {}) or {}),
             sources=list(response.get("sources", []) or []),
             hr_handoff=dict(handoff) if handoff else None,
@@ -220,6 +227,19 @@ class InteractionStore:
                 .order_by(Interaction.created_at)
             )
             return list(session.scalars(query))
+
+    def chat_memory(self, session_id: str) -> dict[str, Any] | None:
+        """The chat's latest summary of its older turns, if it's long enough to have one."""
+        with self._sessions() as session:
+            query = (
+                select(Interaction.memory_summary, Interaction.memory_turns)
+                .where(Interaction.session_id == session_id)
+                .where(Interaction.memory_summary.is_not(None))
+                .order_by(Interaction.created_at.desc())
+                .limit(1)
+            )
+            row = session.execute(query).first()
+        return {"summary": row.memory_summary, "turns_covered": row.memory_turns or 0} if row else None
 
     def session_owners(self, session_id: str) -> set[str | None]:
         """Who asked the questions in a chat: empty for a new chat, otherwise one user."""

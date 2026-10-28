@@ -106,6 +106,7 @@ class FakeStore:
         self.choices: list[tuple[str, bool, str | None, str | None]] = []
         self.read: list[str] = []
         self.usage: list[tuple[str, str | None, list[object]]] = []
+        self.memory: dict[str, object] | None = None
 
     def _interaction(self, interaction_id: str, *, answered: bool = False):
         return SimpleNamespace(
@@ -121,10 +122,12 @@ class FakeStore:
             escalation_status="requested",
             escalation_reason="answer_declined",
             hr_answer=None,
+            hr_answer_chunk_id=None,
             hr_answered_by=None,
             hr_answered_at=None,
             feedback=None,
             feedback_comment=None,
+            debug={"message_route": {"kind": "hr", "search_query": "Can I bring my dog?"}},
         )
 
     def get(self, interaction_id):
@@ -137,6 +140,9 @@ class FakeStore:
 
     def list_session(self, session_id):
         return [self._interaction("interaction-1")]
+
+    def chat_memory(self, session_id):
+        return self.memory
 
     def model_calls_since(self, since):
         return []
@@ -342,8 +348,34 @@ def test_chat_passes_earlier_turns_of_the_session_as_history(users) -> None:
         client.post("/chat", json={"message": "and in Finland?", "session_id": "s-1"})
 
     assert graph.states[0]["history"] == [
-        {"question": "Can I bring my dog?", "answer": "Not in the HR documents. Ask HR?"}
+        {"question": "Can I bring my dog?", "answer": "Not in the HR documents. Ask HR?", "kind": "hr", "sources": []}
     ]
+    assert "memory" not in graph.states[0]
+
+
+def test_chat_passes_the_chats_memory_and_what_each_turn_cited(users) -> None:
+    store = FakeStore(owner_id=users.get_by_email(EMPLOYEE["email"]).id)
+    store.memory = {"summary": "- Asked about parental leave.", "turns_covered": 5}
+    answered = store._interaction("interaction-1", answered=True)
+    answered.sources = [{"chunk_id": "chunk-1"}, {"source_doc": "no id"}]
+    by_hr = store._interaction("interaction-2")
+    by_hr.hr_answer, by_hr.hr_answer_chunk_id = "Dogs are welcome on Fridays.", "hr-chunk"
+    small_talk = store._interaction("interaction-3", answered=True)
+    small_talk.debug = {"message_route": {"kind": "chat"}}
+    store.list_session = lambda session_id: [answered, by_hr, small_talk]
+    graph = FakeGraph()
+
+    with _client(users, graph, store) as client:
+        client.post("/chat", json={"message": "and on Mondays?", "session_id": "s-1"})
+
+    state = graph.states[0]
+    assert state["memory"] == {"summary": "- Asked about parental leave.", "turns_covered": 5}
+    assert [(turn["kind"], turn["sources"]) for turn in state["history"]] == [
+        ("hr", ["chunk-1"]),
+        ("hr", ["hr-chunk"]),
+        ("chat", []),
+    ]
+    assert state["history"][1]["answer"] == "Dogs are welcome on Fridays."
 
 
 def test_chat_offers_hr_when_the_documents_have_no_answer(users) -> None:

@@ -44,6 +44,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--limit", type=int, help="Run only the first N cases (for a quick check).")
     parser.add_argument(
+        "--case",
+        action="append",
+        dest="case_ids",
+        metavar="ID",
+        help="Run only this case, by id (faq-05, long-chat-remembers-early-details, ...). Can be repeated.",
+    )
+    parser.add_argument(
         "--answer-model",
         default=DEFAULT_ANSWER_MODEL,
         help="Model that writes the answers, to compare models before switching.",
@@ -96,6 +103,11 @@ def main() -> None:
         cases += load_faq_cases()
     if args.cases in ("all", "conversations"):
         cases += load_conversation_cases()
+    if args.case_ids:
+        unknown = set(args.case_ids) - {case.id for case in cases}
+        if unknown:
+            raise SystemExit(f"No such case: {', '.join(sorted(unknown))}")
+        cases = [case for case in cases if case.id in args.case_ids]
     if args.limit:
         cases = cases[: args.limit]
 

@@ -111,7 +111,7 @@ def keep_every_section(question, chunks, **_):
     }
 
 
-def route_to_hr(question, history):
+def route_to_hr(question, history, **_):
     del history
     return {"kind": "hr", "search_query": question}
 
@@ -762,7 +762,7 @@ def test_small_talk_is_answered_without_searching_or_offering_hr() -> None:
         engine,
         retriever=retriever,
         answer_generator=fake_answer_generator,
-        message_router=lambda question, history: {"kind": "chat", "search_query": ""},
+        message_router=lambda question, history, **_: {"kind": "chat", "search_query": ""},
         chat_responder=chat_responder,
         interaction_logger=lambda state: logged.append(state) or "interaction-1",
         answer_checker=approve_answer,
@@ -775,7 +775,7 @@ def test_small_talk_is_answered_without_searching_or_offering_hr() -> None:
     history = [{"question": "hey", "answer": "Hello!"}]
     result = graph.invoke({"question": "hi i'm shishir", "history": history, "employee_context": {}})
 
-    assert graph.visited == ["understand_message", "reply_in_chat", "log_interaction"]
+    assert graph.visited == ["remember_conversation", "understand_message", "reply_in_chat", "log_interaction"]
     assert retriever.calls == []
     assert chat_calls[0]["history"] == history
     assert result["final_response"] == {
@@ -805,7 +805,7 @@ def test_follow_up_searches_with_the_rewritten_question_and_answers_with_history
         engine,
         retriever=retriever,
         answer_generator=answer_generator,
-        message_router=lambda question, history: {
+        message_router=lambda question, history, **_: {
             "kind": "hr",
             "search_query": "How much annual leave do employees in Finland get?",
         },
@@ -830,7 +830,7 @@ def test_follow_up_searches_with_the_rewritten_question_and_answers_with_history
 def _filters_for(question, search_query=None):
     graph = _build_graph(
         FakeRetriever(),
-        message_router=lambda message, history: {"kind": "hr", "search_query": search_query or message},
+        message_router=lambda message, history, **_: {"kind": "hr", "search_query": search_query or message},
     )
     result = graph.invoke({"question": question, "employee_context": {"employee_country": "Estonia"}})
     return result["resolved_filters"].get("country")
@@ -989,7 +989,7 @@ def test_found_sections_are_answered_without_grading_by_default() -> None:
     result = graph.invoke({"question": "Who approves equipment?"})
 
     assert calls == []
-    assert graph.visited[4:6] == ["read_neighbours", "generate_answer"]
+    assert graph.visited[5:7] == ["read_neighbours", "generate_answer"]
     assert result["final_response"]["answered"] is True
 
 

@@ -19,12 +19,14 @@ from retrieval.vocabulary import add_policy_terms
 from .answer_check import check_answer, revision_feedback
 from .answering import generate_grounded_answer, is_insufficient_answer
 from .citations import answer_source, number_citations, source_key
-from .conversation import MESSAGE_CHAT, generate_chat_reply, recent_history, route_message
+from .conversation import MESSAGE_CHAT, generate_chat_reply, route_message
 from .document_grading import COVERAGE_COMPLETE, grade_documents
 from .escalation import NOT_FOUND_MESSAGE, build_hr_handoff
+from .memory import EMPTY_MEMORY, carried_sources, split_history, summarise_conversation
 from .state import (
     AnswerCheck,
     AnswerSource,
+    ChatMemory,
     ConversationTurn,
     DocumentGrade,
     EmployeeContext,
@@ -66,7 +68,8 @@ def build_retrieval_graph(
     *,
     retriever: Callable[..., list[RetrievedChunk]] = retrieve,
     answer_generator: Callable[..., str] | None = None,
-    message_router: Callable[[str, list[ConversationTurn]], MessageRoute] = route_message,
+    message_router: Callable[..., MessageRoute] = route_message,
+    conversation_summariser: Callable[[str, list[ConversationTurn]], str] = summarise_conversation,
     chat_responder: Callable[..., str] = generate_chat_reply,
     answer_checker: Callable[..., AnswerCheck] = check_answer,
     document_grader: Callable[..., DocumentGrade] = grade_documents,
@@ -87,6 +90,7 @@ def build_retrieval_graph(
         raise ValueError("start_token and end_token are required when overriding the graph class.")
 
     graph = state_graph_cls(RetrievalState)
+    graph.add_node("remember_conversation", _make_remember_conversation_node(conversation_summariser))
     graph.add_node("understand_message", _make_understand_message_node(message_router))
     graph.add_node("reply_in_chat", _make_reply_in_chat_node(chat_responder))
     graph.add_node("resolve_filters", _resolve_filters_node)
@@ -116,7 +120,8 @@ def build_retrieval_graph(
     graph.add_node("respond_to_user", _respond_to_user_node)
     graph.add_node("answer_not_found", _answer_not_found_node)
     graph.add_node("log_interaction", _make_log_interaction_node(interaction_logger))
-    graph.add_edge(start_token, "understand_message")
+    graph.add_edge(start_token, "remember_conversation")
+    graph.add_edge("remember_conversation", "understand_message")
     # Small talk is answered directly; only HR questions search the documents, so a
     # greeting never ends in "not found, ask HR?".
     graph.add_conditional_edges(
@@ -180,13 +185,34 @@ def build_retrieval_graph(
     return graph.compile()
 
 
+def _make_remember_conversation_node(
+    conversation_summariser: Callable[[str, list[ConversationTurn]], str],
+) -> Callable[[RetrievalState], dict[str, Any]]:
+    def _remember_conversation_node(state: RetrievalState) -> dict[str, Any]:
+        # The latest turns go to the models in full; once there are many, the older ones
+        # are folded into the chat's summary, which is saved with the question.
+        memory: ChatMemory = {**EMPTY_MEMORY, **(state.get("memory") or {})}
+        history = list(state.get("history", []))
+        to_fold, recent = split_history(history, memory)
+        if to_fold:
+            summary = conversation_summariser(memory["summary"], to_fold)
+            memory = {"summary": summary, "turns_covered": len(history) - len(recent)}
+        return {"history": recent, "memory": memory}
+
+    return _remember_conversation_node
+
+
+def _summary(state: RetrievalState) -> str:
+    return (state.get("memory") or {}).get("summary", "")
+
+
 def _make_understand_message_node(
-    message_router: Callable[[str, list[ConversationTurn]], MessageRoute],
+    message_router: Callable[..., MessageRoute],
 ) -> Callable[[RetrievalState], dict[str, Any]]:
     def _understand_message_node(state: RetrievalState) -> dict[str, Any]:
         question = _clean_required_value(state.get("question"), field_name="question")
-        history = recent_history(state.get("history", []))
-        return {"history": history, "message_route": message_router(question, history)}
+        route = message_router(question, state.get("history", []), summary=_summary(state))
+        return {"message_route": route}
 
     return _understand_message_node
 
@@ -201,6 +227,7 @@ def _make_reply_in_chat_node(chat_responder: Callable[..., str]) -> Callable[[Re
         text = chat_responder(
             _clean_required_value(state.get("question"), field_name="question"),
             history=state.get("history", []),
+            summary=_summary(state),
             employee_context=state.get("employee_context", {}),
         )
         response: FinalResponse = {"text": text, "sources": [], "answered": True}
@@ -258,6 +285,17 @@ def _make_retrieve_node(
             apply_reranker=config["apply_reranker"],
         )
 
+        chunks = [asdict(chunk) for chunk in results]
+        if route.get("follows_up"):
+            # A follow-up ("and what about step 3?") also reads what the last answer cited,
+            # which a search for the rewritten question may not find again.
+            found = {chunk["chunk_id"] for chunk in chunks}
+            chunks += [
+                chunk
+                for chunk in _chunks_by_id(engine, carried_sources(state.get("history", [])))
+                if chunk["chunk_id"] not in found
+            ]
+
         retrieval_debug: RetrievalDebug = {
             "resolved_filters": filters.as_dict(),
             "top_n": config["top_n"],
@@ -267,12 +305,27 @@ def _make_retrieve_node(
             "retrieved_count": len(results),
         }
 
-        return {
-            "retrieved_chunks": [asdict(chunk) for chunk in results],
-            "retrieval_debug": retrieval_debug,
-        }
+        return {"retrieved_chunks": chunks, "retrieval_debug": retrieval_debug}
 
     return _retrieve_node
+
+
+def _chunks_by_id(engine: RetrievalEngine, chunk_ids: list[str]) -> list[dict[str, Any]]:
+    """Chunks looked up in the search index, shaped like search results."""
+    index = engine.bm25_index
+    positions = {chunk_id: position for position, chunk_id in enumerate(getattr(index, "chunk_ids", None) or [])}
+    return [
+        asdict(
+            RetrievedChunk(
+                chunk_id=chunk_id,
+                text=index.chunks[positions[chunk_id]].text,
+                metadata=dict(index.chunks[positions[chunk_id]].metadata),
+                source="earlier_answer",
+            )
+        )
+        for chunk_id in chunk_ids
+        if chunk_id in positions
+    ]
 
 
 def _make_read_neighbours_node(
@@ -295,6 +348,7 @@ def _make_grade_documents_node(
             _clean_required_value(state.get("question"), field_name="question"),
             state.get("retrieved_chunks", []),
             history=state.get("history", []),
+            summary=_summary(state),
         )
         # Grading never removes a passage: dropping the ones graded unhelpful cost more
         # answers than it saved (a general section often frames the specific one).
@@ -335,6 +389,7 @@ def _make_search_again_node(
                 _clean_required_value(state.get("question"), field_name="question"),
                 _relevant(graded, first_grade) + new_passages,
                 history=state.get("history", []),
+                summary=_summary(state),
             )
         grade = {**grade, "searched_again": True}
         retrieval_debug = {**state.get("retrieval_debug", {}), "search_again_query": first_grade["missing"]}
@@ -373,6 +428,7 @@ def _make_generate_answer_node(
             question,
             chunks,
             history=state.get("history", []),
+            summary=_summary(state),
             employee_context=state.get("employee_context", {}),
             country=state.get("resolved_filters", {}).get("country"),
         ).strip()
@@ -413,6 +469,7 @@ def _make_check_answer_node(answer_checker: Callable[..., AnswerCheck]) -> Calla
             state.get("retrieved_chunks", []),
             draft,
             history=state.get("history", []),
+            summary=_summary(state),
         )
         if not check["answers_question"]:
             # The draft talks around the question ("not covered", "case by case"), so it
@@ -431,6 +488,7 @@ def _make_revise_answer_node(*, answer_generator: Callable[..., str]) -> Callabl
             _clean_required_value(state.get("question"), field_name="question"),
             chunks,
             history=state.get("history", []),
+            summary=_summary(state),
             employee_context=state.get("employee_context", {}),
             country=state.get("resolved_filters", {}).get("country"),
             draft=state.get("generated_answer", {}).get("text", ""),

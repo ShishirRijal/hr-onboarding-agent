@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 
 class EmployeeContext(TypedDict, total=False):
@@ -99,6 +99,17 @@ class FinalResponse(TypedDict):
 class ConversationTurn(TypedDict):
     question: str
     answer: str
+    # "chat" or "hr", as the router sorted the question; small talk doesn't fill the memory.
+    kind: NotRequired[str]
+    # The chunks the answer cited, so a follow-up can read them again.
+    sources: NotRequired[list[str]]
+
+
+class ChatMemory(TypedDict):
+    # Older turns of the chat, summarised; the latest turns are given to the models in full.
+    summary: str
+    # How many turns, from the start of the chat, the summary covers.
+    turns_covered: int
 
 
 class MessageRoute(TypedDict):
@@ -106,6 +117,8 @@ class MessageRoute(TypedDict):
     kind: str
     # The question rewritten to stand on its own, for searching; empty for small talk.
     search_query: str
+    # True when it builds on the last answer, which then has its sections read again.
+    follows_up: NotRequired[bool]
 
 
 class AnswerCheck(TypedDict):
@@ -134,8 +147,10 @@ class RetrievalState(TypedDict, total=False):
     user_id: str
     question: str
     employee_context: EmployeeContext
-    # Earlier turns of this chat, oldest first.
+    # Earlier turns of this chat, oldest first: all of them going in, only the ones not
+    # covered by the memory's summary after remember_conversation.
     history: list[ConversationTurn]
+    memory: ChatMemory
     message_route: MessageRoute
     retrieval_overrides: RetrievalOverrides
     retrieval_config: RetrievalConfig
