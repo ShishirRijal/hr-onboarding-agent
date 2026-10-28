@@ -11,17 +11,29 @@ HR onboarding assistant for NordTech Solutions, a fictional 200-person company w
 
 ## Architecture
 
-Single LangGraph agent, multiple tools.
+```mermaid
+flowchart LR
+  E[Employee] --> WEB[Next.js web app<br/>chat + HR portal]
+  HR[HR] --> WEB
+  WEB --> API[FastAPI]
+  API --> AG[LangGraph agent]
+  AG <-->|question / top 5 passages| RET[Hybrid search<br/>BGE + BM25, fused with RRF<br/>optional Cohere rerank]
+  RET <--> QD[(Qdrant)]
+  AG <-->|answer, check, revise| LLM[OpenAI<br/>gpt-4o-mini answers<br/>gpt-4.1 checks them]
+  AG --> DB[(SQLite<br/>chats, HR requests,<br/>model calls and cost)]
+  AG -.-> LF[Langfuse traces<br/>names masked]
+  API --> PORTAL[HR inbox, answer review,<br/>usage]
+  PORTAL <--> DB
+  PORTAL -->|HR answers are indexed| QD
+  DB --> DIG[Daily digest<br/>18:00 Tallinn] --> MAIL[Email to HR]
+```
 
-The system is built as one agent with five tools:
+One LangGraph agent answers each message: it searches the policies, writes an answer with numbered citations, checks it, and offers to ask HR when the documents don't cover the question. The steps are in [Data Flow](#data-flow).
 
-- RAG retrieval
-- confidence scoring
-- HR escalation
-- interaction logging
-- a weekly digest job
-
-This keeps the system bounded and easy to reason about while still covering the full workflow from question to answer or handoff.
+- **Search** (`retrieval/`): BGE (`bge-small-en-v1.5`) vector search in Qdrant and BM25 keyword search, fused with reciprocal rank fusion, with Cohere reranking behind `USE_COHERE_RERANK`. Each passage found is read with the pieces either side of it.
+- **Answering** (`agent/`): `gpt-4o-mini` writes the answer from the passages and cites each sentence. `gpt-4.1` reviews the draft before the employee sees it, and a draft with an unsupported claim or a missing condition is rewritten once.
+- **HR handoff** (`interactions/`): when the answer isn't in the documents, the employee is asked whether to send the question to HR. Questions they send wait in the HR inbox and reach HR in one email a day. HR's answer goes back to the employee's chat and into search.
+- **Review and cost** (`interactions/`, `agent/usage.py`): every chat is logged. HR can review any answer anonymously and save a better one, for evaluation and training. Every model call is recorded with its tokens and cost, and a monthly limit stops the assistant when it's reached.
 
 ## What This Project Is
 
@@ -71,69 +83,6 @@ That setup is deliberate. It gives the project a realistic but bounded domain, a
 
 The documents in this repo are written for that context and are meant to feel like real internal policy material, not generic demo text.
 
-## The Five Tools
-
-The agent is built around five tools:
-
-1. `RAG Retrieval Tool`
-   - Takes the employee's question and retrieves the most relevant chunks from the HR knowledge base.
-   - The knowledge base includes the handbook, leave policy, IT setup docs, benefits material, onboarding docs, and related policy references.
-   - Uses hybrid search so it can combine keyword matching and semantic retrieval instead of relying on only one method.
-   - Passes the top candidates through a reranking step before the answer is generated, so the model sees the strongest evidence first.
-   - Returns the retrieved chunks with source attribution and relevance scores.
-
-2. `Confidence Scorer`
-   - Scores how confident the system should be that the retrieved context is enough to answer the question safely.
-   - Exists because an HR assistant that confidently guesses wrong is worse than one that escalates.
-   - Uses retrieval quality and groundedness signals to decide whether the answer should be returned or handed off.
-   - Produces a confidence value that drives the agent's branching logic.
-   - Low confidence triggers escalation instead of a speculative response.
-
-3. `HR Escalation Tool`
-   - Activates when confidence is too low or the question needs human judgment.
-   - Routes the query to a human HR contact rather than letting the model invent an answer.
-   - Handles sensitive or edge-case questions such as grievances, legal ambiguity, or anything outside the policy set.
-   - Formats the question and context into a structured handoff so HR can review it quickly.
-   - Asks the employee first, and only sends questions they agree to; those wait in the HR inbox and reach HR in one email at the end of the day, with who asked. HR's answer goes back to the employee's chat and into the knowledge base.
-   - This is the system's safety valve and the main human-in-the-loop path.
-
-4. `Interaction Logger`
-   - Logs every interaction for traceability, debugging, and later analysis.
-   - Records the question, retrieved context, confidence score, whether the query escalated, and the final answer.
-   - Provides an audit trail for evaluating how the system behaves over time.
-   - Supports later analysis of common question patterns and unanswered topics.
-   - Feeds the weekly digest workflow.
-
-5. `Weekly Digest Job`
-   - Runs independently on a schedule rather than inside the chat loop.
-   - Summarizes the week's unanswered or low-confidence questions.
-   - Groups recurring topics and flags documentation gaps for HR.
-   - Gives the system a background automation layer, not just a request/response chat flow.
-   - Demonstrates that the assistant can support ongoing knowledge maintenance, not only live answers.
-
-This setup keeps the agent simple: one brain, a few clearly separated responsibilities, and a safe fallback path when the answer is uncertain.
-
-```mermaid
-flowchart TD
-  E[Employee] --> UI[Next.js web app]
-  UI --> API[FastAPI POST /chat]
-  API --> AG[LangGraph Agent]
-
-  AG --> RET[RAG Retrieval Tool]
-  RET --> QD[Qdrant Vector DB]
-  AG --> GEN[Generate Answer]
-  GEN --> SCO[Confidence Scorer]
-
-  SCO -->|High confidence| RESP[Respond to User]
-  RESP --> LOG[Interaction Logger]
-
-  SCO -->|Low confidence| ESC[HR Escalation Tool]
-  ESC --> UN[Unanswered Log]
-
-  SCH[APScheduler weekly job] --> UN
-  SCH --> DIG[HR digest]
-```
-
 ## Data Flow
 
 ```mermaid
@@ -166,6 +115,7 @@ flowchart TD
 - `understand_message` sorts greetings, thanks and other small talk from HR questions, and rewrites follow-ups ("and in Finland?") into standalone questions using the last few turns of the chat.
 - `resolve_filters` searches the employee's own country, unless the question names another one.
 - Searches add the policies' own words for everyday ones ("vacation" also searches "annual leave"), see `retrieval/vocabulary.py`.
+- `retrieve_documents` takes the top 20 from BGE vector search and the top 20 from BM25, fuses them with reciprocal rank fusion, and keeps the top 5. With `USE_COHERE_RERANK=true`, Cohere reorders the fused list first.
 - `read_neighbours`: documents are split into ~500-character pieces, and the condition that matters (an approver, the day a rule changes) is often in the next piece of the same section. Each found piece is read with the pieces either side of it, joined into one passage without the repeated overlap (`retrieval/context.py`). Citations still open the piece search found.
 - `grade_documents` and `search_again` are corrective RAG, off unless `CORRECTIVE_SEARCH=1`. `gpt-4.1-mini` grades whether the passages answer the whole question; if not, one more search runs for what's missing, in the policies' own words, and adds the passages that help. If neither search finds anything relevant, the employee is offered HR without an answer being written. Grading never removes passages: dropping the ones graded unhelpful cost more answers than it saved. It's off by default because, on the evaluation set, it added about a second per answer without changing the results: the first search already finds the right document for every test question, and reading neighbours brings in what was missing. It's there for real employees' phrasing, which is harder than the FAQ log's.
 - `check_answer` reviews each draft before the employee sees it (the critique step of Self-RAG, with `gpt-4.1`): a draft that talks around the question ("not covered", "case by case") becomes an offer to ask HR, and one with unsupported claims or a missing condition is rewritten once by `revise_answer`. Because of this, answers aren't streamed while they're written; the progress steps show the check instead.
@@ -212,19 +162,21 @@ Project documentation lives in `docs/` and is reserved for architecture notes, i
 
 ## What It Is For
 
-This system is designed to give employees a fast, grounded way to get HR answers without forcing them to search across multiple documents or wait for manual replies. It is meant to answer routine policy questions directly, cite the right internal sources, and route edge cases to HR when the documents are incomplete or the confidence score is low.
+This system is designed to give employees a fast, grounded way to get HR answers without forcing them to search across multiple documents or wait for manual replies. It is meant to answer routine policy questions directly, cite the right internal sources, and route edge cases to HR when the documents don't cover them.
 
 The build order is also intentional: document ingestion comes first, then retrieval, then the agent layer, then the API and UI.
 
 ## Tech Stack
 
-- LangGraph for orchestration
-- LangChain for document and retrieval primitives
-- Qdrant for vector search
+- LangGraph for the agent, LangChain for model calls and document loading
+- OpenAI: `gpt-4o-mini` for routing and answers, `gpt-4.1` for the self-check and evaluation, `gpt-4.1-mini` for grading passages
+- Qdrant with BGE embeddings (`bge-small-en-v1.5`), BM25, and optional Cohere reranking
 - FastAPI for the API
 - Next.js (React, TypeScript, Tailwind CSS) for the web app
-- APScheduler for weekly digests
-- SQLite and SQLAlchemy for interaction logging, accounts and sign-in sessions
+- SQLite and SQLAlchemy for chats, HR requests, model usage, accounts and sign-in sessions
+- APScheduler for the daily HR digest
+- Langfuse for tracing
+- Docker Compose and GitHub Actions
 
 ## Run It Locally
 
@@ -270,7 +222,7 @@ On first start, with no accounts in the database, the API adds the [demo account
 Every route except `GET /health` and `POST /auth/sign-in` needs a signed-in session, and answers `401` without one.
 
 - `POST /auth/sign-in` checks `{"email": "...", "password": "..."}` and sets the session cookie; `POST /auth/sign-out` ends the session; `GET /auth/me` returns the signed-in user's profile
-- `POST /chat/stream` answers a question as server-sent events: `status` updates while it searches, `token` events as the answer is written, then `done` with the full answer and sources
+- `POST /chat/stream` answers a question as server-sent events: `status` updates while it searches and checks, `token` events for small-talk replies, then `done` with the full answer and sources. HR answers arrive whole in `done`, since only checked text is sent
 - `POST /chat` answers in one response: `{"message": "...", "session_id": "..."}`. Where the employee works (country, office, department, role) comes from their account, not the request
 - `POST /interactions/{interaction_id}/hr-request` records whether the employee wants an unanswered question sent to HR: `{"ask_hr": true}`
 - `POST /interactions/{interaction_id}/feedback` rates one of the employee's own answers: `{"rating": "up" | "down" | null, "comment": "..."}`; a comment is kept only with a thumbs down, and `null` takes the rating back
@@ -365,6 +317,8 @@ The script prints the answer, confidence, sources, and for escalated questions t
 ```bash
 PYTHONPATH=. poetry run pytest
 ```
+
+The tests use fake models, so they make no OpenAI calls. GitHub Actions runs them on every pull request and push to `main`, with a type check, lint and build of the web app (`.github/workflows/ci.yml`).
 
 ### Evaluating answers
 
