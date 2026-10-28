@@ -4,7 +4,7 @@ from typing import Any, Literal, Sequence
 
 from pydantic import BaseModel, Field
 
-from .answering import _format_chunks, _load_default_llm
+from .answering import _format_chunks, _load_default_llm, conversation_text
 from .state import ConversationTurn, DocumentGrade
 
 # Grading sections is a reading task, not a writing one, so a small fast model is enough.
@@ -36,6 +36,7 @@ def grade_documents(
     chunks: list[dict[str, Any]],
     *,
     history: Sequence[ConversationTurn] = (),
+    summary: str = "",
     llm: Any | None = None,
     model: str = DEFAULT_GRADE_MODEL,
 ) -> DocumentGrade:
@@ -47,9 +48,8 @@ def grade_documents(
 
     grader = (llm or _load_default_llm(model=model)).with_structured_output(_Grade)
     parts = []
-    if history:
-        conversation = "\n".join(f"Employee: {turn['question']}\nAssistant: {turn['answer']}" for turn in history)
-        parts.append(f"Conversation so far:\n{conversation}")
+    if history or summary:
+        parts.append(conversation_text(history, summary))
     parts += [f"Question:\n{question.strip()}", f"Sections:\n{_format_chunks(chunks)}"]
     grade = grader.invoke([("system", GRADE_PROMPT), ("human", "\n\n".join(parts))])
 

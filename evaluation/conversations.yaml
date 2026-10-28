@@ -104,3 +104,75 @@
       expect: chat
     - message: what's the capital of France?
       expect: chat
+
+# Memory within a chat. By the last turns the opening message has been folded into the
+# chat's summary, so "when it arrives" only makes sense if the summary kept the baby.
+- id: long-chat-remembers-early-details
+  office: tallinn
+  turns:
+    - message: hi! I joined the Tallinn office last week, and my partner and I are expecting a baby in March
+      expect: chat
+    - message: how many vacation days do I get?
+      expect: answer
+      answer: Employees based in Estonia get 28 calendar days of annual leave per year.
+      sources: [leave_policy]
+      country: Estonia
+    - message: can I carry unused days over?
+      expect: answer
+      answer: Up to 5 unused days can be carried over into the next calendar year; anything beyond that is forfeited on 31 December unless local law requires otherwise.
+      sources: [leave_policy]
+    - message: when is payday?
+      expect: answer
+      answer: Salaries are paid monthly on the 15th; if the 15th is a weekend or public holiday, on the previous working day.
+      sources: [working_hours_policy]
+    - message: what's the meal allowance when I travel abroad for work?
+      expect: answer
+      answer: Up to €40 per day for meals on international travel, covering breakfast, lunch and dinner combined.
+      sources: [expense_policy]
+    - message: and for trips inside Estonia?
+      expect: answer
+      answer: Up to €25 per day for meals on domestic travel.
+      sources: [expense_policy]
+    - message: do I need a receipt for a €20 taxi?
+      expect: answer
+      answer: No. Receipts are only required for single expenses over €25; smaller expenses should still be logged with a brief description.
+      sources: [expense_policy]
+    - message: how long do I have to submit expenses?
+      expect: answer
+      answer: Expenses must be submitted in Expensify within 30 days of being incurred; later submissions may be rejected at the manager's discretion.
+      sources: [expense_policy]
+    - message: who is the CTO?
+      expect: answer
+      answer: Kaspar Tamm is the Chief Technology Officer, based in the Tallinn office.
+      sources: [org_chart]
+    - message: do I get a gym allowance?
+      expect: answer
+      answer: All employees get a €50 per month gym and wellness budget, claimed through Expensify and reimbursed monthly.
+      sources: [benefits_guide]
+    - message: so what leave can we take when it arrives?
+      expect: answer
+      answer: In Estonia, statutory parental benefit is payable for up to 435 days, shared between both parents, at up to 100% of average income (subject to a cap), paid by the Estonian Social Insurance Board rather than NordTech. Employees should tell their manager and HR as early as possible.
+      sources: [leave_policy]
+      country: Estonia
+      mentions: ["435"]
+    - message: remind me, how many unused days could I carry over?
+      expect: answer
+      answer: Up to 5 unused annual leave days can be carried over into the next calendar year.
+      sources: [leave_policy]
+
+# A follow-up about one step of an earlier answer.
+- id: follow-up-on-a-step
+  office: tampere
+  turns:
+    - message: how do I request time off?
+      expect: answer
+      answer: Log in to Personio, select "Request Time Off" and choose the leave type. Annual leave over 5 days must be submitted at least 2 weeks in advance. For sick leave, log it in Personio as soon as possible and tell your manager directly on the first day. Your manager gets an approval request in Personio, and approved leave appears on the team calendar.
+      sources: [leave_policy]
+    - message: what was step 3 again?
+      expect: answer
+      answer: Annual leave of more than 5 days has to be submitted at least 2 weeks in advance.
+      sources: [leave_policy]
+    - message: and the one about being sick?
+      expect: answer
+      answer: For sick leave, log the absence in Personio as soon as possible and notify your manager directly via Slack or a phone call on the first day of absence.
+      sources: [leave_policy]

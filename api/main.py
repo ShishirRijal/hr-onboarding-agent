@@ -474,17 +474,28 @@ def _owns_session(store: Any, session_id: str, user: User) -> bool:
     return not owners or owners == {user.id}
 
 
+def _conversation_turn(item: Any) -> dict[str, Any]:
+    # Where HR has since answered, their answer is the one to follow up on, and its chunk
+    # in the knowledge base is what a follow-up reads again.
+    if item.hr_answer:
+        sources = [item.hr_answer_chunk_id] if item.hr_answer_chunk_id else []
+    else:
+        sources = [source["chunk_id"] for source in item.sources or [] if source.get("chunk_id")]
+    return {
+        "question": item.question,
+        "answer": item.hr_answer or item.answer,
+        "kind": ((item.debug or {}).get("message_route") or {}).get("kind", "hr"),
+        "sources": sources,
+    }
+
+
 def _initial_state(request: ChatRequest, user: User, store: Any) -> tuple[str, dict[str, Any]]:
     session_id = request.session_id or str(uuid.uuid4())
     if request.session_id and not _owns_session(store, session_id, user):
         raise HTTPException(status_code=404, detail=CHAT_NOT_FOUND)
     # Earlier turns let the agent follow the conversation: names, follow-ups, "what about…".
-    # Where HR has since answered, their answer is the one to follow up on.
-    history = (
-        [{"question": item.question, "answer": item.hr_answer or item.answer} for item in store.list_session(session_id)]
-        if request.session_id
-        else []
-    )
+    history = [_conversation_turn(item) for item in store.list_session(session_id)] if request.session_id else []
+    memory = store.chat_memory(session_id) if request.session_id else None
     return session_id, {
         "session_id": session_id,
         "user_id": user.id,
@@ -492,6 +503,7 @@ def _initial_state(request: ChatRequest, user: User, store: Any) -> tuple[str, d
         # Who is asking comes from their account, never from the browser.
         "employee_context": user.employee_context(),
         "history": history,
+        **({"memory": memory} if memory else {}),
         "retrieval_config": {
             "apply_reranker": _env_flag("USE_COHERE_RERANK"),
             "corrective_search": _env_flag("CORRECTIVE_SEARCH"),

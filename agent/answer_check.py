@@ -4,7 +4,7 @@ from typing import Any, Literal, Sequence
 
 from pydantic import BaseModel, Field
 
-from .answering import _format_chunks, _load_default_llm
+from .answering import _format_chunks, _load_default_llm, conversation_text
 from .state import AnswerCheck, ConversationTurn
 
 # A stronger model than the one writing, so it doesn't wave its own kind of draft through.
@@ -36,6 +36,7 @@ def check_answer(
     answer: str,
     *,
     history: Sequence[ConversationTurn] = (),
+    summary: str = "",
     llm: Any | None = None,
     model: str = DEFAULT_CHECK_MODEL,
 ) -> AnswerCheck:
@@ -43,9 +44,8 @@ def check_answer(
     backed, and does it leave out a condition that matters (Self-RAG's critique step)."""
     reviewer = (llm or _load_default_llm(model=model)).with_structured_output(_CheckDecision)
     parts = []
-    if history:
-        conversation = "\n".join(f"Employee: {turn['question']}\nAssistant: {turn['answer']}" for turn in history)
-        parts.append(f"Conversation so far:\n{conversation}")
+    if history or summary:
+        parts.append(conversation_text(history, summary))
     parts += [
         f"Question:\n{question.strip()}",
         f"HR document sections:\n{_format_chunks(chunks)}",

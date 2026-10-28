@@ -20,7 +20,7 @@ flowchart LR
   AG <-->|question / top 5 passages| RET[Hybrid search<br/>BGE + BM25, fused with RRF<br/>optional Cohere rerank]
   RET <--> QD[(Qdrant)]
   AG <-->|answer, check, revise| LLM[OpenAI<br/>gpt-4o-mini answers<br/>gpt-4.1 checks them]
-  AG --> DB[(SQLite<br/>chats, HR requests,<br/>model calls and cost)]
+  AG --> DB[(Postgres<br/>chats and their memory, HR requests,<br/>model calls and cost)]
   AG -.-> LF[Langfuse traces<br/>names masked]
   API --> PORTAL[HR inbox, answer review,<br/>usage]
   PORTAL <--> DB
@@ -32,6 +32,7 @@ One LangGraph agent answers each message: it searches the policies, writes an an
 
 - **Search** (`retrieval/`): BGE (`bge-small-en-v1.5`) vector search in Qdrant and BM25 keyword search, fused with reciprocal rank fusion, with Cohere reranking behind `USE_COHERE_RERANK`. Each passage found is read with the pieces either side of it.
 - **Answering** (`agent/`): `gpt-4o-mini` writes the answer from the passages and cites each sentence. `gpt-4.1` reviews the draft before the employee sees it, and a draft with an unsupported claim or a missing condition is rewritten once.
+- **Chat memory** (`agent/memory.py`): the latest turns of a chat go to the models in full, and once a chat is long the older ones are folded into a short summary saved with the chat, so the assistant remembers what the employee said at the start. A follow-up about the last answer also reads the sections it cited.
 - **HR handoff** (`interactions/`): when the answer isn't in the documents, the employee is asked whether to send the question to HR. Questions they send wait in the HR inbox and reach HR in one email a day. HR's answer goes back to the employee's chat and into search.
 - **Review and cost** (`interactions/`, `agent/usage.py`): every chat is logged. HR can review any answer anonymously and save a better one, for evaluation and training. Every model call is recorded with its tokens and cost, and a monthly limit stops the assistant when it's reached.
 
@@ -87,7 +88,8 @@ The documents in this repo are written for that context and are meant to feel li
 
 ```mermaid
 flowchart TD
-  Q[Message + recent turns] --> UM[understand_message]
+  Q[Message + the chat so far] --> RC[remember_conversation]
+  RC --> UM[understand_message]
   UM -->|Small talk| CH[reply_in_chat]
   UM -->|HR question| RF[resolve_filters]
   RF --> RD[retrieve_documents]
@@ -112,7 +114,8 @@ flowchart TD
   NF --> LI
 ```
 
-- `understand_message` sorts greetings, thanks and other small talk from HR questions, and rewrites follow-ups ("and in Finland?") into standalone questions using the last few turns of the chat.
+- `remember_conversation` is the chat's memory (`agent/memory.py`). The latest turns go to the models in full. Once a chat has more than 8 questions not yet summarised (small talk not counted), or about 10,000 characters of them, all but the last 4 are folded into a short summary by `gpt-4o-mini`. The summary keeps what the employee said about themselves ("we're expecting a baby in March"), what they asked and the key facts of each answer, and what went to HR. It's saved with the question and rewritten every few turns, not on every message, and every model below gets it ahead of the latest turns.
+- `understand_message` sorts greetings, thanks and other small talk from HR questions, and rewrites follow-ups ("and in Finland?") into standalone questions using the chat so far. It also marks a message that builds on the last answer ("what was step 3 again?"): `retrieve_documents` then also reads the sections that answer cited, which a search for the rewritten question may not find again. Where HR answered the last question, that's the answer's section in the knowledge base.
 - `resolve_filters` searches the employee's own country, unless the question names another one.
 - Searches add the policies' own words for everyday ones ("vacation" also searches "annual leave"), see `retrieval/vocabulary.py`.
 - `retrieve_documents` takes the top 20 from BGE vector search and the top 20 from BM25, fuses them with reciprocal rank fusion, and keeps the top 5. With `USE_COHERE_RERANK=true`, Cohere reorders the fused list first.
@@ -124,7 +127,7 @@ flowchart TD
 
 ## Results
 
-Measured with `scripts/eval_answers.py` on 95 turns: the 76 questions in HR's FAQ log and 19 turns of multi-turn conversations. Of those, 75 can be answered from the documents, 13 should go to HR, and 7 are small talk; `gpt-4.1` grades correctness and grounding. Each row adds one upgrade to the one above.
+Measured with `scripts/eval_answers.py` on 95 turns: the 76 questions in HR's FAQ log and 19 turns of multi-turn conversations. Of those, 75 can be answered from the documents, 13 should go to HR, and 7 are small talk; `gpt-4.1` grades correctness and grounding. Each row adds one upgrade to the one above. Two longer conversations that test the chat's memory (15 more turns) were added after these runs.
 
 | Upgrade | Turns fully passing | Correct answers | Sent to HR when they should be | Fully grounded answers | Median time |
 |---|---|---|---|---|---|
@@ -173,7 +176,7 @@ The build order is also intentional: document ingestion comes first, then retrie
 - Qdrant with BGE embeddings (`bge-small-en-v1.5`), BM25, and optional Cohere reranking
 - FastAPI for the API
 - Next.js (React, TypeScript, Tailwind CSS) for the web app
-- SQLite and SQLAlchemy for chats, HR requests, model usage, accounts and sign-in sessions
+- PostgreSQL and SQLAlchemy for chats, HR requests, model usage, accounts and sign-in sessions (SQLite when no database is set, as in the tests)
 - APScheduler for the daily HR digest
 - Langfuse for tracing
 - Docker Compose and GitHub Actions
@@ -189,7 +192,7 @@ cp .env.example .env          # then add OPENAI_API_KEY
 docker compose up --build
 ```
 
-This starts everything: Qdrant, Mailpit, the API and the web app. Open http://localhost:3000 and sign in with one of the [demo accounts](#demo-accounts). On the first start the API loads the corpus into Qdrant and adds the demo accounts; after that it leaves both as they are. Chats, the HR inbox and accounts are kept in `./data`, shared with runs outside Docker, and Mailpit's inbox for the HR digest is at http://localhost:8025. The API image runs PyTorch on the CPU and includes the embedding model, so the first build takes a few minutes. Give Docker at least 4 GB of memory: loading the corpus needs more than the 2 GB some setups (Colima, for one) start with.
+This starts everything: Postgres, Qdrant, Mailpit, the API and the web app. Open http://localhost:3000 and sign in with one of the [demo accounts](#demo-accounts). On the first start the API loads the corpus into Qdrant and adds the demo accounts; after that it leaves both as they are. Chats, the HR inbox, model usage and accounts are kept in Postgres (port 5433 on your machine, so it doesn't clash with another Postgres on 5432), and Mailpit's inbox for the HR digest is at http://localhost:8025. The API image runs PyTorch on the CPU and includes the embedding model, so the first build takes a few minutes. Give Docker at least 4 GB of memory: loading the corpus needs more than the 2 GB some setups (Colima, for one) start with.
 
 ### Without Docker
 
@@ -198,14 +201,17 @@ For the API outside Docker, `.env` also needs:
 ```bash
 QDRANT_URL=http://localhost:6333
 QDRANT_COLLECTION=nordtech_hr
+INTERACTIONS_DATABASE_URL=postgresql+psycopg://hr:hr-local@localhost:5433/hr_onboarding
 ```
+
+Without `INTERACTIONS_DATABASE_URL`, the API uses a SQLite file at `data/interactions.db` instead. To move an existing SQLite database into Postgres, stop the API and run `scripts/move_to_postgres.py --to <postgres url>`: it backs up the file to `data/backups/`, opens it read-only, copies every table into the empty Postgres database, and checks every row arrived. It refuses to copy into a database that already has data.
 
 `COHERE_API_KEY` is optional. The API runs without Cohere reranking unless `USE_COHERE_RERANK=true` (the trial key is limited to 10 calls a minute). Corrective RAG (grading the found sections and searching again) is off unless `CORRECTIVE_SEARCH=true`.
 
-**1. Start Qdrant and Mailpit, and ingest the corpus**
+**1. Start Postgres, Qdrant and Mailpit, and ingest the corpus**
 
 ```bash
-docker compose up -d qdrant mailpit
+docker compose up -d postgres qdrant mailpit
 PYTHONPATH=. poetry run python scripts/ingest.py
 ```
 
@@ -242,7 +248,7 @@ HR team only (`403` for employees):
 - `POST /hr/review/{interaction_id}`: `{"verdict": "correct" | "corrected", "answer": "..."}` saves HR's review; `corrected` needs the answer HR would have given. Reviewing again replaces it
 - `GET /hr/usage?period=day|week|month|year`: tokens and cost of the assistant's model calls for today, this week, this month and this year, the monthly limit, and that period's split by model, by agent step and by source
 
-Every question is logged to `data/interactions.db` with the user who asked (`user_id`). Questions the documents can't answer have `answered = 0` and `escalation_status` set to `offered`, then `requested` or `declined` once the employee chooses, or `dismissed` if they ask something else without choosing; the ones sent to HR also have `escalated = 1`, and become `answered` when HR replies from the HR inbox (`hr_answer`, `hr_answered_by`, `hr_answered_at`).
+Every question is logged to the `interactions` table with the user who asked (`user_id`). Questions the documents can't answer have `answered = 0` and `escalation_status` set to `offered`, then `requested` or `declined` once the employee chooses, or `dismissed` if they ask something else without choosing; the ones sent to HR also have `escalated = 1`, and become `answered` when HR replies from the HR inbox (`hr_answer`, `hr_answered_by`, `hr_answered_at`).
 
 Declined and dismissed questions don't store a name or email. Questions sent to HR also store who asked (`employee_name`, `employee_email`), taken from the signed-in account, so HR can reply.
 
@@ -315,14 +321,15 @@ The script prints the answer, confidence, sources, and for escalated questions t
 ### Tests
 
 ```bash
+poetry install --extras dev
 PYTHONPATH=. poetry run pytest
 ```
 
-The tests use fake models, so they make no OpenAI calls. GitHub Actions runs them on every pull request and push to `main`, with a type check, lint and build of the web app (`.github/workflows/ci.yml`).
+The tests use fake models, so they make no OpenAI calls, and SQLite files, so they need no database running. With `TEST_POSTGRES_URL` set to a Postgres server, the database copy is also tested against real Postgres. GitHub Actions runs them, with a Postgres service, on every pull request and push to `main`, with a type check, lint and build of the web app (`.github/workflows/ci.yml`).
 
 ### Evaluating answers
 
-`scripts/eval_answers.py` runs the real agent on every question in `corpus/hr_faq_log.csv` and on the multi-turn conversations in `evaluation/conversations.yaml` (greetings, follow-ups, other countries, everyday words, off-topic, questions the documents don't cover), then checks each reply:
+`scripts/eval_answers.py` runs the real agent on every question in `corpus/hr_faq_log.csv` and on the multi-turn conversations in `evaluation/conversations.yaml` (greetings, follow-ups, other countries, everyday words, off-topic, questions the documents don't cover, a long chat that has to remember its opening message, and a follow-up about one step of an earlier answer), then checks each reply:
 
 - **Behaviour**: answered, offered to ask HR, or chatted, as expected
 - **Cited the right document** and **searched the right country**
@@ -332,6 +339,7 @@ The tests use fake models, so they make no OpenAI calls. GitHub Actions runs the
 ```bash
 PYTHONPATH=. poetry run python scripts/eval_answers.py                      # everything, about 6 minutes
 PYTHONPATH=. poetry run python scripts/eval_answers.py --cases conversations --limit 3
+PYTHONPATH=. poetry run python scripts/eval_answers.py --case long-chat-remembers-early-details --case follow-up-on-a-step
 PYTHONPATH=. poetry run python scripts/eval_answers.py --answer-model gpt-4.1-mini --out-dir data/evaluations/gpt-4.1-mini
 PYTHONPATH=. poetry run python scripts/eval_answers.py --corrective-search  # with corrective RAG switched on
 PYTHONPATH=. poetry run python scripts/eval_answers.py --no-judge          # skip the gpt-4.1 grading

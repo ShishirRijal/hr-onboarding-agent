@@ -29,6 +29,7 @@ def generate_grounded_answer(
     chunks: list[dict[str, Any]],
     *,
     history: Sequence[ConversationTurn] = (),
+    summary: str = "",
     employee_context: EmployeeContext | None = None,
     country: str | None = None,
     draft: str | None = None,
@@ -40,7 +41,7 @@ def generate_grounded_answer(
         return NO_ANSWER_MESSAGE
 
     client = llm or _load_default_llm(model=model)
-    messages = _build_messages(question, chunks, history, employee_context or {}, country)
+    messages = _build_messages(question, chunks, history, employee_context or {}, country, summary)
     if draft and feedback:
         # A rewrite after review: the model sees its draft and what to fix, and answers again.
         messages += [("ai", draft), ("human", feedback)]
@@ -68,12 +69,24 @@ def first_name(employee_context: EmployeeContext) -> str:
     return (employee_context.get("employee_name") or "").split(" ")[0]
 
 
-def history_messages(history: Sequence[ConversationTurn]) -> list[tuple[str, str]]:
-    messages: list[tuple[str, str]] = []
+def history_messages(history: Sequence[ConversationTurn], summary: str = "") -> list[tuple[str, str]]:
+    """The chat so far as chat messages: the summary of older turns, then the latest turns."""
+    messages: list[tuple[str, str]] = [("system", summary_note(summary))] if summary else []
     for turn in history:
         messages.append(("human", turn["question"]))
         messages.append(("ai", turn["answer"]))
     return messages
+
+
+def summary_note(summary: str) -> str:
+    return f"Summary of earlier in this chat:\n{summary}" if summary else ""
+
+
+def conversation_text(history: Sequence[ConversationTurn], summary: str = "") -> str:
+    """The chat so far as text, for models that get it inside one message."""
+    turns = "\n".join(f"Employee: {turn['question']}\nAssistant: {turn['answer']}" for turn in history)
+    parts = [summary_note(summary), f"Latest turns:\n{turns}" if summary else f"Conversation so far:\n{turns}"]
+    return "\n\n".join(part for part in parts if part) if turns or summary else ""
 
 
 def _load_default_llm(*, model: str = DEFAULT_ANSWER_MODEL, temperature: float = 0) -> Any:
@@ -95,13 +108,14 @@ def _build_messages(
     history: Sequence[ConversationTurn],
     employee_context: EmployeeContext,
     country: str | None = None,
+    summary: str = "",
 ) -> list[tuple[str, str]]:
     employee = describe_employee(employee_context)
     name = first_name(employee_context)
     # Earlier turns come first so follow-ups like "and in Finland?" read naturally.
     return [
         ("system", SYSTEM_PROMPT),
-        *history_messages(history),
+        *history_messages(history, summary),
         (
             "human",
             "\n\n".join(
@@ -109,7 +123,7 @@ def _build_messages(
                 for part in [
                     f"The employee is {name + ', ' if name else ''}{employee}." if employee else "",
                     _country_note(country, employee_context),
-                    _greeting_note(name, first_message=not history),
+                    _greeting_note(name, first_message=not history and not summary),
                     f"Question:\n{question.strip()}",
                     f"HR document excerpts:\n{_format_chunks(chunks)}",
                 ]
