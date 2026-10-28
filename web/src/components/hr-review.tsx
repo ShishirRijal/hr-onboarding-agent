@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, fetchReviewDetail, fetchReviewPage, saveReview } from "@/lib/api";
-import { stripCitations } from "@/lib/citations";
+import { previewText } from "@/lib/citations";
 import { formatDateTime } from "@/lib/format";
 import { formatNumber, formatUsd } from "@/lib/usage";
 import type { ReviewDetail, ReviewFilter, ReviewItem, ReviewVerdict, Source } from "@/lib/types";
@@ -155,7 +155,7 @@ function ReviewCard({ item, show }: { item: ReviewItem; show: ReviewFilter }) {
         <Tags item={item} />
       </div>
       <p className="mt-2 font-semibold text-ink">{item.question}</p>
-      <p className="mt-1 line-clamp-2 text-sm text-ink-soft">{stripCitations(item.answer)}</p>
+      <p className="mt-1 line-clamp-2 text-sm text-ink-soft">{previewText(item.answer)}</p>
       {item.feedback === "down" && item.feedback_comment && (
         <p className="mt-2 border-l-2 border-alert/40 pl-2.5 text-sm text-ink">“{item.feedback_comment}”</p>
       )}

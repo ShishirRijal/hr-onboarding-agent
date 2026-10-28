@@ -17,3 +17,14 @@ export function linkCitations(text: string, typing: boolean): string {
   const shown = typing ? text.replace(/\[\d*$/, "") : text;
   return shown.replace(CITATION, (_, number: string) => `[${number}](#source-${number})`);
 }
+
+// An answer as one line of plain text, for previews in lists: no citations, emphasis or
+// list markers.
+export function previewText(text: string): string {
+  return stripCitations(text)
+    .replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, "")
+    .replace(/(\*\*|__|\*|_|`)(.+?)\1/g, "$2")
+    .replace(/^#+\s*/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
