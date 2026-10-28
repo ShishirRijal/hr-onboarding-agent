@@ -29,6 +29,7 @@ dependencies = [
     "rank-bm25>=0.2",
     "langchain-text-splitters (>=1.1.2,<2.0.0)",
     "langfuse (>=5.0.4,<6)",
+    "psycopg[binary] (>=3.2,<4.0)",
 ]
 
 [project.optional-dependencies]

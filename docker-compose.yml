@@ -11,6 +11,26 @@ services:
       - qdrant_storage:/qdrant/storage
     restart: unless-stopped
 
+  # Chats, the HR inbox, model usage and accounts. Port 5433 on the host, so it doesn't
+  # clash with another Postgres on 5432. The password is for local use only.
+  postgres:
+    image: postgres:17.6-alpine
+    container_name: hr-onboarding-postgres
+    environment:
+      POSTGRES_USER: hr
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hr-local}
+      POSTGRES_DB: hr_onboarding
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hr -d hr_onboarding"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
   # Catches outgoing email locally so the HR digest can be checked without sending real
   # mail: SMTP on 1025, inbox at http://localhost:8025.
   mailpit:
@@ -31,17 +51,21 @@ services:
       QDRANT_URL: http://qdrant:6333
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
-      INTERACTIONS_DATABASE_URL: sqlite:///data/interactions.db
+      INTERACTIONS_DATABASE_URL: postgresql+psycopg://hr:${POSTGRES_PASSWORD:-hr-local}@postgres:5432/hr_onboarding
       CORPUS_DIR: corpus
       WEB_ORIGINS: http://localhost:3000
-    # Chats, the HR inbox and accounts, shared with runs outside Docker.
+    # Evaluation reports, exports and backups, shared with runs outside Docker.
     volumes:
       - ./data:/app/data
     ports:
       - "8010:8010"
     depends_on:
-      - qdrant
-      - mailpit
+      qdrant:
+        condition: service_started
+      mailpit:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
       interval: 10s
@@ -62,3 +86,4 @@ services:
 
 volumes:
   qdrant_storage:
+  postgres_data:
