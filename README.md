@@ -29,6 +29,40 @@ This is a single LangGraph agent for HR onboarding and internal policy support. 
 
 The goal is a production-style assistant that can handle the repetitive HR questions employees ask during onboarding and day-to-day work, while preserving a human handoff for edge cases.
 
+## Screenshots
+
+Kertu joined the Tallinn office last week. She asks about her leave, then about colleagues in Finland. Each fact is numbered with the document it came from.
+
+![Kertu's chat: an answer about annual leave and carry-over with numbered citations, and a follow-up about Finland](docs/screenshots/chat-answer.png)
+
+Clicking a number opens that document beside the chat, with the part the answer used highlighted.
+
+![The Leave & Absence Policy opened beside the chat, with Estonia's annual leave highlighted](docs/screenshots/chat-source.png)
+
+The documents don't say whether she can bring her dog, so the assistant offers to ask HR instead of guessing.
+
+![The assistant can't find the dog question in the documents and offers to ask HR](docs/screenshots/chat-offer-hr.png)
+
+Marju in HR sees the question in her inbox, with who asked, why the assistant couldn't answer, and which documents it checked. Her answer goes to Kertu's chat and into what the assistant knows, for employees in Estonia.
+
+![The HR inbox with two open questions](docs/screenshots/hr-inbox.png)
+
+![Marju writing her answer to the dog question, for employees in Estonia](docs/screenshots/hr-answer.png)
+
+![HR's answer in Kertu's chat](docs/screenshots/chat-hr-reply.png)
+
+Every answer can be rated. The answer review lists everything employees asked, without their names, and here Alex marked an answer unhelpful. Marju can mark it right or write a better one, and sees what the answer cost.
+
+![The answer review listing every question, with one marked unhelpful](docs/screenshots/hr-review.png)
+
+![Alex's unhelpful answer with their comment, its cost, and the review form](docs/screenshots/hr-review-detail.png)
+
+The Usage page shows what the assistant's OpenAI calls cost, and where the money goes.
+
+![The Usage page: this month's cost, today, this week and this year, and the split by model](docs/screenshots/hr-usage.png)
+
+<img src="docs/screenshots/mobile-chat.png" alt="The chat on a phone" width="320">
+
 ## Company Context
 
 NordTech Solutions is the fictional company behind the project. It is a ~200-person tech startup with offices in Tallinn, Porto, and Tampere.
